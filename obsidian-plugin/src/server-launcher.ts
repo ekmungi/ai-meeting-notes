@@ -10,7 +10,7 @@ import { existsSync } from "fs";
 import { requestUrl } from "obsidian";
 import { serverBaseUrl } from "./types";
 
-export type LauncherState = "stopped" | "starting" | "running" | "error";
+type LauncherState = "stopped" | "starting" | "running" | "error";
 
 const HEALTH_POLL_MS = 250;
 const HEALTH_TIMEOUT_MS = 15_000;

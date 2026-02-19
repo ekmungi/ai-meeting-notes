@@ -51,6 +51,24 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "AI Meeting Notes" });
 
+    // --- Recording Disclaimer ---
+    const disclaimerEl = containerEl.createDiv({ cls: "mn-disclaimer" });
+    disclaimerEl.createEl("p", {
+      text: "This plugin records audio from your microphone and system speakers, which may capture the voices of other meeting participants. Recording meetings may require explicit consent from all participants under applicable laws. You are solely responsible for complying with local recording consent laws.",
+    });
+
+    new Setting(disclaimerEl)
+      .setName("I understand and accept responsibility")
+      .setDesc("You must accept this disclaimer before recording. This setting is saved and only needs to be checked once.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.disclaimerAccepted)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, disclaimerAccepted: value };
+            await this.plugin.saveSettings();
+          })
+      );
+
     // --- Server ---
     containerEl.createEl("h3", { text: "Server" });
 

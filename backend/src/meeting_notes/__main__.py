@@ -115,6 +115,13 @@ async def cmd_record(args: argparse.Namespace, config: Config) -> None:
     from meeting_notes.audio.devices import AudioDevice
     from meeting_notes.session import MeetingSession
 
+    print(
+        "WARNING: Ensure all meeting participants have been informed that this session\n"
+        "will be recorded. You are responsible for complying with applicable recording\n"
+        "consent laws in your jurisdiction.\n",
+        file=sys.stderr,
+    )
+
     # Resolve device selections
     mic_device = None
     system_device = None

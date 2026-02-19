@@ -10,6 +10,7 @@ export interface MeetingNotesSettings {
   outputFolder: string;
   showPartials: boolean;
   localModelSize: string;
+  disclaimerAccepted: boolean;
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   outputFolder: "Meetings",
   showPartials: true,
   localModelSize: "small.en",
+  disclaimerAccepted: false,
 };
 
 /** Build the server base URL from port. */

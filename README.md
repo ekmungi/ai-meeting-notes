@@ -6,6 +6,16 @@ Supports two transcription engines:
 - **Cloud** (AssemblyAI) — best accuracy, requires internet and API key
 - **Local** (faster-whisper) — fully offline, runs on CPU
 
+## Disclaimer
+
+**Use at your own risk.** This software records audio from your microphone and system speakers, which may capture the voices and conversations of other meeting participants.
+
+Recording meetings may require **explicit consent from all participants** under applicable laws. Many jurisdictions enforce two-party or all-party consent statutes that make it illegal to record conversations without the knowledge and agreement of every person involved.
+
+**You are solely responsible** for complying with all local, state, and federal recording consent laws in your jurisdiction. The authors and contributors of this project accept no liability for any misuse or legal consequences arising from the use of this software.
+
+Before recording any meeting, ensure you have informed all participants and obtained any required consent.
+
 ## Features
 
 - **Desktop UI** — Dark-themed pywebview application for easy recording control

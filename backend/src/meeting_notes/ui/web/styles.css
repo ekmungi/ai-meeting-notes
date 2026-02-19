@@ -170,6 +170,27 @@ body {
   color: var(--text-primary);
 }
 
+/* Consent Row */
+.consent-row {
+  padding: 0 16px 8px;
+}
+
+.consent-row__label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.consent-row__check {
+  margin-top: 2px;
+  accent-color: var(--accent-amber);
+  flex-shrink: 0;
+}
+
 /* Session List */
 .session-list {
   flex: 1;

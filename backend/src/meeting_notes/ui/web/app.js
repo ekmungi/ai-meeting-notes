@@ -18,6 +18,7 @@ const elBtnSettingsClose = document.getElementById("btn-settings-close");
 const elBtnSettingsSave = document.getElementById("btn-settings-save");
 const elBtnSettingsCancel = document.getElementById("btn-settings-cancel");
 const elBtnBrowseOutput = document.getElementById("btn-browse-output");
+const elConsentCheck = document.getElementById("consent-check");
 const elToastContainer = document.getElementById("toast-container");
 
 // Settings inputs
@@ -36,6 +37,15 @@ let recordingStartTime = null;
 // -- Initialization --
 
 async function init() {
+  // Start with recording disabled until consent is given
+  elBtnStart.disabled = true;
+
+  elConsentCheck.addEventListener("change", () => {
+    if (!isRecording) {
+      elBtnStart.disabled = !elConsentCheck.checked;
+    }
+  });
+
   try {
     const settings = await pywebview.api.get_settings();
     applySettings(settings);
@@ -113,6 +123,7 @@ function renderSessionList(sessions) {
 
 elBtnStart.addEventListener("click", async () => {
   if (isRecording) return;
+  if (!elConsentCheck.checked) return;
 
   elBtnStart.disabled = true;
   elBtnStart.textContent = "Starting...";
@@ -234,7 +245,8 @@ function onRecordingFileReady(filePath) {
 // Called from Python when recording has fully stopped (audio processed)
 function onRecordingStopped(outputPath) {
   isRecording = false;
-  elBtnStart.disabled = false;
+  elConsentCheck.checked = false;
+  elBtnStart.disabled = true;
   elBtnStart.textContent = "Start Recording";
   elBtnStop.disabled = true;
   elEngineSelect.disabled = false;

@@ -160,10 +160,23 @@ export default class AIMeetingNotesPlugin extends Plugin {
   }
 
   private async startRecording(): Promise<void> {
+    if (!this.settings.disclaimerAccepted) {
+      new Notice(
+        "You must accept the recording disclaimer in AI Meeting Notes settings before recording.",
+        8000,
+      );
+      return;
+    }
+
     if (!this.settings.serverExePath) {
       new Notice("Configure the server executable path in AI Meeting Notes settings.");
       return;
     }
+
+    new Notice(
+      "Recording consent: Ensure all participants have been informed this meeting will be recorded. You are responsible for complying with local recording laws.",
+      8000,
+    );
 
     this.setState("starting");
 
