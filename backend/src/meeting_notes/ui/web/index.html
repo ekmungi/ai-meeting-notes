@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Meeting Notes</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/thin/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Title Bar -->
+  <header class="title-bar">
+    <div class="title-bar__drag">
+      <i class="ph-thin ph-microphone title-bar__icon"></i>
+      <h1 class="title-bar__title">AI Meeting Notes</h1>
+      <span class="title-bar__version">v0.1.0</span>
+    </div>
+    <div class="title-bar__controls">
+      <button id="btn-minimize" class="title-bar__ctrl" title="Minimize">
+        <i class="ph ph-minus"></i>
+      </button>
+      <button id="btn-close" class="title-bar__ctrl title-bar__ctrl--close" title="Close">
+        <i class="ph ph-x"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Action Row -->
+  <div class="action-row">
+    <select id="engine-select" class="action-row__select">
+      <option value="cloud">Cloud</option>
+      <option value="local">Local</option>
+      <option value="auto">Auto</option>
+    </select>
+    <button id="btn-start" class="action-row__btn action-row__btn--start">Start Recording</button>
+    <button id="btn-stop" class="action-row__btn action-row__btn--stop" disabled>Stop</button>
+    <button id="btn-settings" class="action-row__btn action-row__btn--settings" title="Settings">
+      <i class="ph ph-sliders-horizontal"></i>
+    </button>
+  </div>
+
+  <!-- Session List -->
+  <div class="session-list" id="session-list">
+    <div class="session-list__empty" id="session-empty">No sessions yet. Start a recording.</div>
+  </div>
+
+  <!-- Status Bar -->
+  <footer class="status-bar">
+    <span id="status-text" class="status-bar__text">Ready</span>
+    <span id="status-privacy" class="status-bar__privacy"></span>
+  </footer>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settings-overlay">
+    <div class="modal">
+      <div class="modal__header">
+        <h2 class="modal__title">Settings</h2>
+        <button class="modal__close" id="btn-settings-close"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="modal__body">
+        <div class="form-group">
+          <label for="setting-api-key">AssemblyAI API Key</label>
+          <input type="password" id="setting-api-key" class="form-input" placeholder="Enter API key...">
+        </div>
+        <div class="form-group">
+          <label for="setting-output-dir">Output Directory</label>
+          <div class="form-row">
+            <input type="text" id="setting-output-dir" class="form-input form-input--wide" placeholder="Default: current directory">
+            <button id="btn-browse-output" class="form-btn-sm">Browse</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="setting-timestamps">Timestamp Mode</label>
+          <select id="setting-timestamps" class="form-input">
+            <option value="elapsed">Elapsed (00:05:00)</option>
+            <option value="local_time">Local Time (14:30:00)</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="setting-endpointing">Endpointing</label>
+          <select id="setting-endpointing" class="form-input">
+            <option value="conservative">Conservative (recommended)</option>
+            <option value="balanced">Balanced</option>
+            <option value="aggressive">Aggressive</option>
+            <option value="very_conservative">Very Conservative</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="setting-model-size">Local Model</label>
+          <select id="setting-model-size" class="form-input">
+            <option value="tiny.en">Tiny — fastest, basic quality (~75 MB)</option>
+            <option value="base.en">Base — fast, decent quality (~145 MB)</option>
+            <option value="distil-small.en">Distil Small — fast, good quality (~166 MB)</option>
+            <option value="small.en">Small — balanced (recommended, ~244 MB)</option>
+            <option value="distil-large-v3">Distil Large v3 — best quality + speed (~756 MB)</option>
+            <option value="medium.en">Medium — high accuracy, slow (~769 MB)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button id="btn-settings-save" class="form-btn">Save</button>
+        <button id="btn-settings-cancel" class="form-btn form-btn--secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

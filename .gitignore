@@ -1,0 +1,60 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# uv
+.python-version
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Test/coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Audio files (can be large)
+*.wav
+*.mp3
+*.m4a
+
+# Project knowledge base (not version-controlled)
+.project/
+
+# Meeting notes output (generated files)
+*Meeting Notes*.md
+
+# Node (Obsidian plugin)
+node_modules/
+obsidian-plugin/main.js
+
+# Logs
+*.log
+
+# Ruff linter cache
+.ruff_cache/
+
+# Claude Code session files (machine-specific, may contain personal paths)
+.claude/
+.claude/settings.local.json
+.claude/pm/
+
+# Local development artifacts
+BACKUP-DONTUSE-CLAUDE.md
+1.1
