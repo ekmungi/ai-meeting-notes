@@ -8,6 +8,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from meeting_notes.ui.crypto import decrypt_value, encrypt_value
+
 logger = logging.getLogger(__name__)
 
 _APP_DIR_NAME = "ai-meeting-notes"
@@ -69,9 +71,13 @@ def load_settings(settings_dir: Path | None = None) -> UserSettings:
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        # Filter to known fields only
         known = {k: v for k, v in raw.items() if k in _SERIALIZABLE_FIELDS}
-        return UserSettings(**known)
+        settings = UserSettings(**known)
+        # Decrypt the API key from storage; plaintext values pass through for migration
+        if settings.assemblyai_api_key:
+            decrypted = decrypt_value(settings.assemblyai_api_key)
+            settings = settings.replace(assemblyai_api_key=decrypted)
+        return settings
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
         logger.warning("Corrupt settings file %s: %s — using defaults", path, exc)
         return UserSettings()
@@ -83,7 +89,8 @@ def save_settings(settings: UserSettings, settings_dir: Path | None = None) -> N
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = asdict(settings)
-    # Never persist the API key to disk in plaintext — keep it in the JSON
-    # but this is the user's local machine so it's acceptable.
+    # Encrypt the API key before writing to disk; empty strings are left as-is
+    if data.get("assemblyai_api_key"):
+        data["assemblyai_api_key"] = encrypt_value(data["assemblyai_api_key"])
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     logger.debug("Settings saved to %s", path)

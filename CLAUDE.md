@@ -79,15 +79,18 @@ try {
 
 ## Project Management
 
-Read and store Project information at `./.claude/pm/`:
-- `decision-log.md` - Architecture decisions
-- `known-issues.md` - Bug tracking
-- `feature-backlog.md` - Roadmap
-- `session-log.md` - Development history
-- `./.claude/pm/research/YYYYMMDD_Descriptive_Name` - Technical research
-- `./.claude/pm/plans/project-plan_V#.md` - Project plan with version number
+Project memory follows the Jeeves convention. All PM files live in the user-level project memory directory:
+`~/.claude/projects/{project}/memory/`
 
-Update these files as we work.
+Key files:
+- `plan.md` - Project plan and sprint roadmap (owner: product-manager agent)
+- `decisions.md` - Architecture and product decisions (owner: product-manager agent)
+- `known-issues.md` - Bug tracking
+- `feature-backlog.md` - Feature backlog and completed phases
+- `session-log.md` - Development history
+- `research/` - Technical research documents
+
+Do NOT store PM files inside the repository. Never commit plan files to git.
 
 
 ## Environment Variables

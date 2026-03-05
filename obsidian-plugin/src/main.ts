@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import { DEFAULT_SETTINGS, serverBaseUrl } from "./types";
 import { WsClient } from "./ws-client";
+import { decryptValue, encryptValue } from "./crypto";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -133,11 +134,26 @@ export default class AIMeetingNotesPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
-    this.settings = { ...DEFAULT_SETTINGS, ...data };
+    const merged = { ...DEFAULT_SETTINGS, ...data };
+    // Decrypt the API key from storage so in-memory settings always hold plaintext.
+    this.settings = {
+      ...merged,
+      assemblyaiApiKey: decryptValue(merged.assemblyaiApiKey),
+    };
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    // Encrypt the API key before persisting to disk; in-memory key stays plaintext.
+    const dataToSave = {
+      ...this.settings,
+      assemblyaiApiKey: encryptValue(this.settings.assemblyaiApiKey),
+    };
+    console.debug("AI Meeting Notes: saving settings", {
+      serverExePath: dataToSave.serverExePath,
+      serverPort: dataToSave.serverPort,
+      engine: dataToSave.engine,
+    });
+    await this.saveData(dataToSave);
   }
 
   // --- Recording lifecycle ---

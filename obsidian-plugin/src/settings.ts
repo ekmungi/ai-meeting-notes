@@ -5,6 +5,7 @@
 
 import { AbstractInputSuggest, App, PluginSettingTab, Setting, TextComponent, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
+import { isEncryptionAvailable } from "./crypto";
 
 /**
  * Autocomplete suggest for vault folders.
@@ -95,9 +96,19 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           input.addEventListener("change", async () => {
             const file = input.files?.[0];
             if (!file) return;
-            // Electron attaches the real filesystem path to File objects
-            const path = (file as unknown as { path: string }).path;
-            if (!path) return;
+            // Electron attaches the real filesystem path to File objects.
+            // The property is non-standard; use optional chaining and nullish
+            // coalescing so we get a string even on Electron builds where it
+            // is undefined.
+            const path = (file as unknown as { path?: string }).path ?? "";
+            if (!path) {
+              console.warn(
+                "AI Meeting Notes: Browse did not return a file path. " +
+                "This may happen if Obsidian's Electron version does not expose File.path. " +
+                "Please type the path manually."
+              );
+              return;
+            }
             exePathText.setValue(path);
             this.plugin.settings = { ...this.plugin.settings, serverExePath: path };
             await this.plugin.saveSettings();
@@ -150,6 +161,18 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    // Warn the user if DPAPI / safeStorage is unavailable so the plaintext risk is visible.
+    if (!isEncryptionAvailable()) {
+      const warningEl = containerEl.createEl("p", {
+        text: "Note: API key encryption is not available on this platform. " +
+          "The key is stored as plaintext in plugin data.",
+        cls: "mn-settings-warning",
+      });
+      warningEl.style.color = "var(--text-warning)";
+      warningEl.style.fontSize = "0.85em";
+      warningEl.style.marginTop = "-0.5em";
+    }
 
     new Setting(containerEl)
       .setName("Engine")
