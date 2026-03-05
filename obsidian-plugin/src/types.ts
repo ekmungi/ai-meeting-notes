@@ -11,6 +11,10 @@ export interface MeetingNotesSettings {
   showPartials: boolean;
   localModelSize: string;
   disclaimerAccepted: boolean;
+  meetingTypes: string[];
+  meetingTemplatePath: string;
+  mergeTranscriptOnStop: boolean;
+  silenceTimerSeconds: number;
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -25,6 +29,10 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   showPartials: true,
   localModelSize: "small.en",
   disclaimerAccepted: false,
+  meetingTypes: ["1:1", "Standup", "Weekly Sync", "Design Review", "Interview", "All Hands"],
+  meetingTemplatePath: "",
+  mergeTranscriptOnStop: false,
+  silenceTimerSeconds: 15,
 };
 
 /** Build the server base URL from port. */
@@ -58,7 +66,12 @@ export interface PongMessage {
   timestamp: number;
 }
 
-export type ServerMessage = TranscriptMessage | StatusMessage | ErrorMessage | PongMessage;
+export interface SilenceMessage {
+  type: "silence";
+  silent_seconds: number;
+}
+
+export type ServerMessage = TranscriptMessage | StatusMessage | ErrorMessage | PongMessage | SilenceMessage;
 
 /** REST API response types. */
 export interface StartResponse {
