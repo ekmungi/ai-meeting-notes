@@ -105,6 +105,8 @@ async def session_start(req: StartRequest):
         system_audio_device_index=req.system_device_index,
         local_model_size=req.local_model_size,
         silence_threshold_seconds=req.silence_threshold_seconds,
+        record_wav=req.record_wav,
+        speaker_labels=req.speaker_labels,
     )
 
     # Validate config
@@ -174,6 +176,7 @@ async def session_stop():
     return StopResponse(
         output_path=_runner.output_path,
         duration_seconds=round(elapsed, 1),
+        wav_path=_runner.wav_path,
     )
 
 

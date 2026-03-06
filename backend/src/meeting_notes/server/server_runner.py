@@ -14,6 +14,7 @@ from pathlib import Path
 
 from meeting_notes.audio.devices import AudioDevice
 from meeting_notes.audio.silence import SilenceMonitor
+from meeting_notes.audio.wav_writer import WavWriter
 from meeting_notes.config import Config
 from meeting_notes.engines.base import TranscriptSegment
 from meeting_notes.server.ws import ConnectionManager
@@ -43,6 +44,8 @@ class ServerRunner:
         self._paused_at: float = 0.0
         self._total_paused_seconds: float = 0.0
         self._silence_monitor: SilenceMonitor | None = None
+        self._wav_writer: WavWriter | None = None
+        self._wav_path: str | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -56,6 +59,11 @@ class ServerRunner:
     @property
     def output_path(self) -> str:
         return self._output_path
+
+    @property
+    def wav_path(self) -> str | None:
+        """Path to WAV recording, or None if not enabled."""
+        return self._wav_path
 
     @property
     def elapsed_seconds(self) -> float:
@@ -136,9 +144,27 @@ class ServerRunner:
             else:
                 self._silence_monitor = None
 
+            # Set up WAV recording if enabled
+            if config.record_wav and config.output_dir:
+                wav_file = config.output_dir / f"recording_{int(time.time())}.wav"
+                self._wav_writer = WavWriter(wav_file)
+                self._wav_writer.open()
+                self._wav_path = str(wav_file)
+                writer = self._wav_writer
+                self._session.add_audio_callback(
+                    lambda chunk, w=writer: w.write_chunk(chunk.data)
+                )
+                logger.info("WAV recording enabled: %s", wav_file)
+            else:
+                self._wav_writer = None
+                self._wav_path = None
+
             try:
                 output_path = await self._session.start()
             except Exception:
+                if self._wav_writer:
+                    self._wav_writer.close()
+                    self._wav_writer = None
                 _remove_lock()
                 self._session = None
                 raise
@@ -175,6 +201,12 @@ class ServerRunner:
             self._silence_monitor = None
 
             await self._session.stop()
+
+            # Close WAV writer if active
+            if self._wav_writer:
+                self._wav_writer.close()
+                self._wav_writer = None
+
             self._session = None
 
             _remove_lock()

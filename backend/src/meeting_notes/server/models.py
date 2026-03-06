@@ -37,6 +37,8 @@ class StartRequest(BaseModel):
         pattern=r"^(tiny\.en|base\.en|distil-small\.en|small\.en|distil-large-v3|medium\.en)$",
     )
     silence_threshold_seconds: int = Field(default=15, ge=0, le=120)
+    record_wav: bool = False
+    speaker_labels: bool = False
 
 
 class StartResponse(BaseModel):
@@ -49,6 +51,7 @@ class StopResponse(BaseModel):
     status: str = "stopped"
     output_path: str
     duration_seconds: float
+    wav_path: str | None = None
 
 
 class PauseResponse(BaseModel):
