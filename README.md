@@ -29,6 +29,12 @@ Before recording any meeting, ensure you have informed all participants and obta
 - Three timestamp modes: elapsed time, wall-clock time, or none
 - Configurable endpointing sensitivity for natural sentence boundaries
 - Persistent settings stored in `%APPDATA%/ai-meeting-notes/settings.json`
+- **Encrypted API key storage** — DPAPI encryption on Windows (plugin + desktop)
+- **Silence detection** — Rolling RMS energy monitor with status bar indicator and configurable auto-stop
+- **Meeting types** — Quick-switcher modal on record start; notes named `YYYYMMDD_HH-MM - Type`
+- **Separate notes + transcript** — Two-file system with side-by-side layout and optional merge
+- **WAV recording** — Parallel WAV file written alongside every transcript (~1.9 MB/min)
+- **Speaker diarization** — Real-time speaker labels in cloud transcripts (`**[Speaker A]**` prefixes)
 
 ## Requirements
 
@@ -356,17 +362,27 @@ All settings can be provided via environment variables in `.env` or as CLI flags
             |     +-- Microphone stream (16kHz mono PCM)
             |     +-- System audio stream (WASAPI loopback)
             |     +-- Mixed audio queue
+            |     +-- Audio callbacks (SilenceMonitor, WavWriter)
             |
             +-- TranscriptionEngine (one of):
             |     +-- CloudEngine (AssemblyAI streaming API)
             |     |     +-- Conservative endpointing
             |     |     +-- Fragment merging (combines short utterances)
             |     |     +-- Server-side VAD
+            |     |     +-- Speaker diarization (streaming labels)
             |     +-- LocalEngine (faster-whisper)
             |           +-- 10-second chunked transcription (configurable)
             |           +-- Bounded queue (maxsize=2, drop-oldest policy)
             |           +-- Module-level model cache (persistent across sessions)
             |           +-- Thread pool executor (non-blocking audio ingestion)
+            |
+            +-- SilenceMonitor (rolling RMS energy detection)
+            |     +-- Configurable threshold + auto-stop timer
+            |     +-- Status bar indicator via WS broadcast
+            |
+            +-- WavWriter (parallel WAV recording)
+            |     +-- 16kHz mono int16 PCM via wave module
+            |     +-- Best-effort writes (errors logged, never interrupt)
             |
             +-- MarkdownWriter
                   +-- YAML frontmatter
@@ -391,7 +407,7 @@ In `auto` mode (default):
 | Internet | Required | Not needed |
 | Cost | $0.0025/min (~$6/mo for 40hrs) | Free |
 | Privacy | Data sent to AssemblyAI (SOC2, TLS, AES-256) | Fully on-device |
-| Diarization | Available (future) | Basic mic/system split (future) |
+| Diarization | Speaker labels (streaming) | Not available |
 
 ## Project Structure
 
@@ -411,9 +427,11 @@ ai-meeting-notes/
         audio/
           capture.py    # Dual-stream audio capture (WASAPI)
           devices.py    # Audio device enumeration
+          silence.py    # Rolling RMS silence detection + auto-stop
+          wav_writer.py # Parallel WAV file recording
         engines/
-          base.py       # Abstract engine interface
-          cloud.py      # AssemblyAI streaming engine
+          base.py       # Abstract engine interface + TranscriptSegment
+          cloud.py      # AssemblyAI streaming engine (with speaker labels)
           local.py      # faster-whisper local engine
           selector.py   # Engine selection logic
         output/
@@ -422,16 +440,16 @@ ai-meeting-notes/
           app.py               # Routes, lifespan, Uvicorn startup
           models.py            # Pydantic request/response models
           ws.py                # WebSocket connection manager + broadcast
-          server_runner.py     # Async MeetingSession adapter
+          server_runner.py     # Async MeetingSession adapter (WAV + diarization)
         ui/
           app.py        # pywebview window creation
           api.py        # JavaScript API bridge
           session_runner.py    # Session lifecycle management
-          settings_store.py    # Settings persistence
+          settings_store.py    # Settings persistence (DPAPI encrypted keys)
           config_bridge.py     # Config synchronization
           web/          # HTML, CSS, JavaScript assets
     tests/
-      # 130 tests covering all modules
+      # 153 tests covering all modules
       test_*.py
   obsidian-plugin/               # Obsidian plugin (TypeScript)
     manifest.json                # Plugin metadata
@@ -441,9 +459,11 @@ ai-meeting-notes/
       main.ts                   # Plugin entry: 4-state machine, auto-launch
       settings.ts               # Settings tab (exe path, port, API key, etc.)
       server-launcher.ts        # Server child process lifecycle manager
-      transcript-view.ts        # Note creation + live transcript updates
+      transcript-view.ts        # Note creation + live transcript + speaker labels
       ws-client.ts              # WebSocket with heartbeat + reconnection
       types.ts                  # TypeScript interfaces + settings
+      crypto.ts                 # DPAPI API key encryption (electron.safeStorage)
+      meeting-type-modal.ts     # Quick-switcher modal for meeting type selection
 ```
 
 ## Development
@@ -455,7 +475,7 @@ cd backend
 pytest -v
 ```
 
-132 tests should pass. Tests cover configuration, engine behavior, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, and Pydantic models.
+153 tests should pass. Tests cover configuration, engine behavior, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, Pydantic models, silence detection, WAV recording, and speaker diarization.
 
 ### Linting
 
@@ -516,11 +536,16 @@ On Windows, if Ctrl+C doesn't respond immediately, press it again. The signal ha
 
 - [x] Desktop UI (pywebview dark-themed app)
 - [x] Obsidian plugin + FastAPI server + auto-launch server exe
-- [ ] UI polish (better buttons, animations, keyboard shortcuts, accessibility)
-- [ ] Raw audio WAV recording fallback
-- [ ] Internet dropout recovery (buffer WAV, stream to AssemblyAI on reconnect)
-- [ ] Speaker diarization (cloud: AssemblyAI labels, local: mic/system split)
 - [x] Pause/resume recording
+- [x] Encrypted API key storage (DPAPI)
+- [x] Silence detection with auto-stop
+- [x] Meeting type selector + smart note naming
+- [x] Separate notes + transcript files
+- [x] WAV recording fallback (~1.9 MB/min)
+- [x] Cloud speaker diarization (streaming labels)
+- [ ] Internet dropout recovery (buffer WAV, reconnect to AssemblyAI)
+- [ ] Meeting sidebar (floating transcript panel)
+- [ ] UI polish (keyboard shortcuts, animations, accessibility)
 
 ## License
 
