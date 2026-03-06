@@ -36,6 +36,7 @@ class StartRequest(BaseModel):
         default="small.en",
         pattern=r"^(tiny\.en|base\.en|distil-small\.en|small\.en|distil-large-v3|medium\.en)$",
     )
+    silence_threshold_seconds: int = Field(default=15, ge=0, le=120)
 
 
 class StartResponse(BaseModel):

@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from meeting_notes.audio.devices import AudioDevice
+from meeting_notes.audio.silence import SilenceMonitor
 from meeting_notes.config import Config
 from meeting_notes.engines.base import TranscriptSegment
 from meeting_notes.server.ws import ConnectionManager
@@ -41,6 +42,7 @@ class ServerRunner:
         self._session_lock = asyncio.Lock()
         self._paused_at: float = 0.0
         self._total_paused_seconds: float = 0.0
+        self._silence_monitor: SilenceMonitor | None = None
 
     @property
     def is_recording(self) -> bool:
@@ -114,6 +116,26 @@ class ServerRunner:
 
             self._session.add_transcript_callback(_broadcast_cb)
 
+            # Wire up silence monitoring if enabled
+            if config.silence_threshold_seconds > 0:
+                def _silence_cb(silent_seconds: float) -> None:
+                    if self._loop and self._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._ws_manager.broadcast_silence(silent_seconds),
+                            self._loop,
+                        )
+                self._silence_monitor = SilenceMonitor(
+                    threshold_seconds=config.silence_threshold_seconds,
+                    interval_seconds=15.0,
+                    on_silence=_silence_cb,
+                )
+                self._session.add_audio_callback(
+                    lambda chunk: self._silence_monitor.feed_chunk(chunk.data)
+                    if self._silence_monitor else None
+                )
+            else:
+                self._silence_monitor = None
+
             try:
                 output_path = await self._session.start()
             except Exception:
@@ -149,6 +171,8 @@ class ServerRunner:
                     await self._status_task
                 except asyncio.CancelledError:
                     pass
+
+            self._silence_monitor = None
 
             await self._session.stop()
             self._session = None

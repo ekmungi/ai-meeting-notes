@@ -23,6 +23,7 @@ class Config:
     local_cpu_threads: int = 0   # 0 = auto-detect (os.cpu_count() // 2)
     local_chunk_seconds: int = 10  # Audio accumulation window before transcription
     timestamp_mode: str = "elapsed"  # "none", "local_time", "elapsed"
+    silence_threshold_seconds: int = 15
 
     @classmethod
     def load(cls, env_path: Path | None = None) -> Config:

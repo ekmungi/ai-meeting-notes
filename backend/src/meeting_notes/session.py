@@ -47,6 +47,7 @@ class MeetingSession:
         self._paused = False
         self._task: asyncio.Task | None = None
         self._extra_callbacks: list[Callable[[TranscriptSegment], None]] = []
+        self._audio_callbacks: list = []
 
     def add_transcript_callback(
         self, callback: Callable[[TranscriptSegment], None],
@@ -57,6 +58,14 @@ class MeetingSession:
         here fire after the built-in _on_transcript handler.
         """
         self._extra_callbacks.append(callback)
+
+    def add_audio_callback(self, cb: Callable) -> None:
+        """Register a callback invoked for each audio chunk in the audio loop.
+
+        Args:
+            cb: Callable receiving the audio chunk object.
+        """
+        self._audio_callbacks.append(cb)
 
     @property
     def is_running(self) -> bool:
@@ -190,6 +199,14 @@ class MeetingSession:
                     continue
 
                 chunks_forwarded += 1
+
+                # Notify audio callbacks (e.g., silence monitor)
+                for cb in self._audio_callbacks:
+                    try:
+                        cb(chunk)
+                    except Exception:
+                        pass
+
                 await self._engine.send_audio(chunk.data)
 
                 if chunks_forwarded % 500 == 0:

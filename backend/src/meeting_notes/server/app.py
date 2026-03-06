@@ -104,6 +104,7 @@ async def session_start(req: StartRequest):
         mic_device_index=req.mic_device_index,
         system_audio_device_index=req.system_device_index,
         local_model_size=req.local_model_size,
+        silence_threshold_seconds=req.silence_threshold_seconds,
     )
 
     # Validate config

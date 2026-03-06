@@ -89,6 +89,13 @@ class ConnectionManager:
             "message": message,
         })
 
+    async def broadcast_silence(self, silent_seconds: float) -> None:
+        """Broadcast a silence alert to all connected clients."""
+        await self.broadcast({
+            "type": "silence",
+            "silent_seconds": round(silent_seconds, 1),
+        })
+
 
 async def websocket_endpoint(ws: WebSocket, manager: ConnectionManager) -> None:
     """Handle a single WebSocket connection with heartbeat."""
