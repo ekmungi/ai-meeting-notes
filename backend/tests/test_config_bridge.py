@@ -44,6 +44,26 @@ def test_validate_local_no_api_key_needed():
     assert not any("API key" in e for e in errors)
 
 
+def test_settings_to_config_maps_new_fields():
+    s = UserSettings(
+        silence_threshold_seconds=30,
+        record_wav=True,
+        speaker_labels=True,
+    )
+    c = settings_to_config(s)
+    assert c.silence_threshold_seconds == 30
+    assert c.record_wav is True
+    assert c.speaker_labels is True
+
+
+def test_settings_to_config_new_field_defaults():
+    s = UserSettings()
+    c = settings_to_config(s)
+    assert c.silence_threshold_seconds == 15
+    assert c.record_wav is False
+    assert c.speaker_labels is False
+
+
 def test_validate_bad_output_dir():
     s = UserSettings(engine="local", output_dir="/nonexistent/path/xyz")
     errors = validate_for_recording(s)

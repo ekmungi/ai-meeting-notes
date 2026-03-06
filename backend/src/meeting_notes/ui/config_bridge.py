@@ -21,6 +21,9 @@ def settings_to_config(settings: UserSettings) -> Config:
         local_model_size=settings.local_model_size,
         local_compute_type=settings.local_compute_type,
         timestamp_mode=settings.timestamp_mode,
+        silence_threshold_seconds=settings.silence_threshold_seconds,
+        record_wav=settings.record_wav,
+        speaker_labels=settings.speaker_labels,
     )
 
 
