@@ -16,6 +16,7 @@ import {
 } from "obsidian";
 
 import { MeetingNotesSettingTab } from "./settings";
+import { MeetingTypeModal } from "./meeting-type-modal";
 import { ServerLauncher } from "./server-launcher";
 import { TranscriptView } from "./transcript-view";
 import type {
@@ -220,6 +221,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
         timestamp_mode: this.settings.timestampMode,
         endpointing: this.settings.endpointing,
         local_model_size: this.settings.localModelSize,
+        silence_threshold_seconds: this.settings.silenceTimerSeconds,
       };
 
       const resp = await requestUrl({
@@ -251,6 +253,9 @@ export default class AIMeetingNotesPlugin extends Plugin {
       this.startElapsedTimer();
 
       new Notice(`Recording started (${data.engine} engine)`);
+
+      // Show meeting type modal non-blocking (recording is already running)
+      this._showMeetingTypeModal();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const serverStderr = this.serverLauncher.lastError;
@@ -387,6 +392,27 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
 
     this.setState("idle");
+  }
+
+  /** Show the meeting type selector. Recording is already active. */
+  private _showMeetingTypeModal(): void {
+    const modal = new MeetingTypeModal(
+      this.app,
+      this.settings.meetingTypes,
+      async (selectedType) => {
+        if (!selectedType || !this.transcriptView) return;
+        await this.transcriptView.renameForType(selectedType);
+        // Persist new types added inline
+        if (!this.settings.meetingTypes.includes(selectedType)) {
+          this.settings = {
+            ...this.settings,
+            meetingTypes: [...this.settings.meetingTypes, selectedType],
+          };
+          await this.saveSettings();
+        }
+      },
+    );
+    modal.open();
   }
 
   // --- UI updates ---

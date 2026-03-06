@@ -278,5 +278,113 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    // --- Silence ---
+    containerEl.createEl("h3", { text: "Silence Detection" });
+
+    new Setting(containerEl)
+      .setName("Silence timer (seconds)")
+      .setDesc("Seconds of silence before status bar shows a warning. Set to 0 to disable.")
+      .addText((text) =>
+        text
+          .setPlaceholder("15")
+          .setValue(String(this.plugin.settings.silenceTimerSeconds))
+          .onChange(async (value) => {
+            const seconds = parseInt(value, 10);
+            if (!isNaN(seconds) && seconds >= 0 && seconds <= 120) {
+              this.plugin.settings = { ...this.plugin.settings, silenceTimerSeconds: seconds };
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    // --- Meeting Types ---
+    containerEl.createEl("h3", { text: "Meeting Types" });
+
+    new Setting(containerEl)
+      .setName("Meeting template")
+      .setDesc("Path to an Obsidian note to use as template for new meetings. Leave empty for built-in default. Supports {{meeting_type}}, {{date}}, {{transcript_embed}} variables.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Templates/Meeting Template")
+          .setValue(this.plugin.settings.meetingTemplatePath)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, meetingTemplatePath: value };
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Merge transcript on stop")
+      .setDesc("When recording stops, merge the transcript into the notes file and delete the separate transcript file (moved to trash).")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.mergeTranscriptOnStop)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, mergeTranscriptOnStop: value };
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // Meeting types list
+    const typesContainer = containerEl.createDiv({ cls: "mn-meeting-types" });
+    this._renderMeetingTypesList(typesContainer);
+  }
+
+  /** Render the editable list of meeting types inside the given container. */
+  private _renderMeetingTypesList(container: HTMLElement): void {
+    container.empty();
+
+    new Setting(container)
+      .setName("Meeting types")
+      .setDesc("Types available in the quick-switcher when starting a recording.");
+
+    let newTypeValue = "";
+    new Setting(container)
+      .addText((text) => {
+        text.setPlaceholder("New type name...");
+        text.onChange((value) => { newTypeValue = value; });
+        text.inputEl.addEventListener("keydown", async (e) => {
+          if (e.key === "Enter" && newTypeValue.trim()) {
+            const trimmed = newTypeValue.trim();
+            if (!this.plugin.settings.meetingTypes.includes(trimmed)) {
+              this.plugin.settings = {
+                ...this.plugin.settings,
+                meetingTypes: [...this.plugin.settings.meetingTypes, trimmed],
+              };
+              await this.plugin.saveSettings();
+              this._renderMeetingTypesList(container);
+            }
+          }
+        });
+      })
+      .addButton((btn) =>
+        btn.setButtonText("Add").onClick(async () => {
+          const trimmed = newTypeValue.trim();
+          if (trimmed && !this.plugin.settings.meetingTypes.includes(trimmed)) {
+            this.plugin.settings = {
+              ...this.plugin.settings,
+              meetingTypes: [...this.plugin.settings.meetingTypes, trimmed],
+            };
+            await this.plugin.saveSettings();
+            this._renderMeetingTypesList(container);
+          }
+        })
+      );
+
+    for (const meetingType of this.plugin.settings.meetingTypes) {
+      new Setting(container)
+        .setName(meetingType)
+        .addButton((btn) =>
+          btn.setButtonText("Remove").onClick(async () => {
+            this.plugin.settings = {
+              ...this.plugin.settings,
+              meetingTypes: this.plugin.settings.meetingTypes.filter((t) => t !== meetingType),
+            };
+            await this.plugin.saveSettings();
+            this._renderMeetingTypesList(container);
+          })
+        );
+    }
   }
 }
