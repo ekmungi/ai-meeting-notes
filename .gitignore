@@ -55,8 +55,9 @@ obsidian-plugin/main.js
 .claude/settings.local.json
 .claude/pm/
 
-# Implementation plans (local only, never committed)
-docs/plans/
+# Git worktrees (isolated workspaces)
+.worktrees/
+
 
 # Local development artifacts
 BACKUP-DONTUSE-CLAUDE.md
