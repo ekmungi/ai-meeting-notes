@@ -4,6 +4,7 @@
 
 // DOM references
 const elEngineSelect = document.getElementById("engine-select");
+const elMeetingTypeSelect = document.getElementById("meeting-type-select");
 const elBtnStart = document.getElementById("btn-start");
 const elBtnStop = document.getElementById("btn-stop");
 const elBtnSettings = document.getElementById("btn-settings");
@@ -62,6 +63,17 @@ function applySettings(s) {
   elTimestamps.value = s.timestamp_mode || "elapsed";
   elEndpointing.value = s.endpointing || "conservative";
   elModelSize.value = s.local_model_size || "small.en";
+
+  // Populate meeting types dropdown
+  const types = s.meeting_types || ["Meeting Notes"];
+  elMeetingTypeSelect.innerHTML = "";
+  types.forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    elMeetingTypeSelect.appendChild(opt);
+  });
+
   updatePrivacyBadge(s.engine);
 }
 
@@ -131,7 +143,8 @@ elBtnStart.addEventListener("click", async () => {
 
   try {
     const engine = elEngineSelect.value;
-    const result = await pywebview.api.start_recording(engine);
+    const meetingType = elMeetingTypeSelect.value;
+    const result = await pywebview.api.start_recording(engine, meetingType);
     if (result.error) {
       showToast(result.error, "error");
       elBtnStart.disabled = false;
@@ -179,6 +192,7 @@ function onRecordingStarted(engineName) {
   elBtnStart.textContent = "Recording...";
   elBtnStop.disabled = false;
   elEngineSelect.disabled = true;
+  elMeetingTypeSelect.disabled = true;
   elStatusText.textContent = "Recording in progress";
 
   // Insert active row
@@ -250,6 +264,7 @@ function onRecordingStopped(outputPath) {
   elBtnStart.textContent = "Start Recording";
   elBtnStop.disabled = true;
   elEngineSelect.disabled = false;
+  elMeetingTypeSelect.disabled = false;
   elStatusText.textContent = "Ready";
 
   // Clear timer if stop was triggered from Python side (crash/watchdog)

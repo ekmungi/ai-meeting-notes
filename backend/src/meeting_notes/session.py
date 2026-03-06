@@ -88,6 +88,7 @@ class MeetingSession:
                 output_dir=self._config.output_dir,
                 engine_name=self._engine.name,
                 timestamp_mode=self._config.timestamp_mode,
+                meeting_type=self._config.meeting_type,
             )
             output_path = self._writer.start()
 

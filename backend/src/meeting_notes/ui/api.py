@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,7 @@ class MeetingNotesAPI:
 
     # -- Recording --
 
-    def start_recording(self, engine: str) -> dict:
+    def start_recording(self, engine: str, meeting_type: str = "Meeting Notes") -> dict:
         from meeting_notes.ui.config_bridge import settings_to_config, validate_for_recording
         from meeting_notes.ui.session_runner import SessionRunner
         from meeting_notes.ui.settings_store import load_settings
@@ -107,6 +107,8 @@ class MeetingNotesAPI:
             return {"error": errors[0]}
 
         config = settings_to_config(settings)
+        # Override meeting type with UI selection (not persisted in settings)
+        config = replace(config, meeting_type=meeting_type)
 
         self._runner = SessionRunner(
             config=config,

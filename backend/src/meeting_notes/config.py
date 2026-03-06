@@ -23,6 +23,7 @@ class Config:
     local_cpu_threads: int = 0   # 0 = auto-detect (os.cpu_count() // 2)
     local_chunk_seconds: int = 10  # Audio accumulation window before transcription
     timestamp_mode: str = "elapsed"  # "none", "local_time", "elapsed"
+    meeting_type: str = "Meeting Notes"
     silence_threshold_seconds: int = 15
     record_wav: bool = False
     speaker_labels: bool = False
