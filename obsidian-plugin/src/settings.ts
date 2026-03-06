@@ -279,6 +279,18 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("Record WAV")
+      .setDesc("Save a WAV audio file alongside the transcript. ~1.9 MB per minute of recording.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.recordWav)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, recordWav: value };
+            await this.plugin.saveSettings();
+          })
+      );
+
     // --- Silence ---
     containerEl.createEl("h3", { text: "Silence Detection" });
 

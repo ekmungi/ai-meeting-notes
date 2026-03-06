@@ -210,6 +210,23 @@ export class TranscriptView {
     ].join("\n");
   }
 
+  /** Add audio file reference to the notes file frontmatter. */
+  async addWavReference(wavPath: string): Promise<void> {
+    if (!this.file) return;
+    const wavFilename = wavPath.split(/[/\\]/).pop() || wavPath;
+    await this.app.vault.process(this.file, (content) => {
+      // Insert audio field into frontmatter
+      if (content.startsWith("---")) {
+        const endIdx = content.indexOf("---", 3);
+        if (endIdx > 0) {
+          const frontmatter = content.slice(0, endIdx);
+          return frontmatter + `audio: "${wavFilename}"\n` + content.slice(endIdx);
+        }
+      }
+      return content;
+    });
+  }
+
   /** Dispatch an incoming WebSocket transcript message. */
   async onTranscript(msg: TranscriptMessage): Promise<void> {
     if (!this.file || !this.transcriptFile) return;
