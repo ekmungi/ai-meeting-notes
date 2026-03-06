@@ -291,6 +291,49 @@ body {
   animation: rowSlideIn 0.2s ease forwards;
 }
 
+/* Silence detection */
+.status-bar__text--silence {
+  color: #D4A017;
+}
+
+.toast--warning {
+  background: #D4A017;
+  color: #1a1a1a;
+}
+
+/* Live transcript preview */
+.transcript-preview {
+  margin: 0 12px 8px;
+  background: #1e1e1c;
+  border: 1px solid #3a3a38;
+  border-radius: 6px;
+  max-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-preview__header {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #3a3a38;
+}
+
+.transcript-preview__body {
+  padding: 8px 10px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d4d4d4;
+}
+
+.transcript-preview__line {
+  margin: 0 0 4px;
+}
+
 /* Status Bar */
 .status-bar {
   display: flex;

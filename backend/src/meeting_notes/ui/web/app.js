@@ -195,6 +195,12 @@ function onRecordingStarted(engineName) {
   elMeetingTypeSelect.disabled = true;
   elStatusText.textContent = "Recording in progress";
 
+  // Clear live transcript
+  var tbody = document.getElementById("transcript-body");
+  if (tbody) tbody.innerHTML = "";
+  var tprev = document.getElementById("transcript-preview");
+  if (tprev) tprev.hidden = false;
+
   // Insert active row
   elSessionEmpty.hidden = true;
   recordingStartTime = Date.now();
@@ -302,6 +308,39 @@ function formatElapsed(totalSeconds) {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// -- Silence Detection Callbacks (called from Python) --
+
+// Called from Python when silence exceeds threshold
+function updateSilenceStatus(seconds) {
+  if (seconds > 0) {
+    elStatusText.textContent = "Silence detected (" + seconds + "s)";
+    elStatusText.className = "status-bar__text status-bar__text--silence";
+  } else {
+    elStatusText.textContent = "Recording in progress";
+    elStatusText.className = "status-bar__text";
+  }
+}
+
+// Called from Python at 100s of silence
+function onSilenceWarning() {
+  showToast("Extended silence detected. Recording will auto-stop at 120s.", "warning");
+}
+
+// -- Live Transcript Callback (called from Python) --
+
+// Called from Python with each final transcript segment
+function appendTranscript(text) {
+  var el = document.getElementById("transcript-body");
+  var container = document.getElementById("transcript-preview");
+  if (!el || !container) return;
+  container.hidden = false;
+  var p = document.createElement("p");
+  p.className = "transcript-preview__line";
+  p.textContent = text;
+  el.appendChild(p);
+  el.scrollTop = el.scrollHeight;
 }
 
 // -- Settings --

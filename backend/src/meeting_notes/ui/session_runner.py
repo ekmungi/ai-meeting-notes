@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from pathlib import Path
 from typing import Any
 
+from meeting_notes.audio.silence import SilenceMonitor
+from meeting_notes.audio.wav_writer import WavWriter
 from meeting_notes.config import Config
+from meeting_notes.engines.base import TranscriptSegment
 from meeting_notes.session import MeetingSession
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,11 @@ class SessionRunner:
         self._running = False
         self._output_path: str | None = None
         self._segment_count = 0
+        self._silence_monitor: SilenceMonitor | None = None
+        self._silence_auto_stop: bool = False
+        self._wav_writer: WavWriter | None = None
+        self._wav_path: str | None = None
+        self._last_speaker: str | None = None
 
     @property
     def is_running(self) -> bool:
@@ -115,18 +124,33 @@ class SessionRunner:
         """Start the meeting session (runs on bg loop)."""
         assert self._session is not None
 
-        # Monkey-patch the session's transcript callback to track segment count
-        original_cb = self._session._on_transcript
-
-        def counting_cb(segment):
-            original_cb(segment)
-            if not segment.is_partial and segment.text.strip():
-                self._segment_count += 1
-
-        self._session._on_transcript = counting_cb
+        # Register transcript callback for segment counting and live preview
+        self._last_speaker = None
+        self._session.add_transcript_callback(self._on_transcript_segment)
 
         output_path = await self._session.start()
         self._output_path = str(output_path) if output_path else None
+
+        # Set up silence monitor
+        if self._config.silence_threshold_seconds > 0:
+            self._silence_monitor = SilenceMonitor(
+                threshold_seconds=self._config.silence_threshold_seconds,
+                on_silence=self._on_silence,
+            )
+            self._session.add_audio_callback(
+                lambda chunk: self._silence_monitor.feed_chunk(chunk.data)
+            )
+
+        # Set up WAV recording
+        if self._config.record_wav and self._output_path:
+            wav_file = Path(self._output_path).with_suffix(".wav")
+            self._wav_writer = WavWriter(wav_file)
+            self._wav_writer.open()
+            self._wav_path = str(wav_file)
+            writer = self._wav_writer
+            self._session.add_audio_callback(
+                lambda chunk, w=writer: w.write_chunk(chunk.data)
+            )
 
         # Notify JS of the output file path immediately so the user knows
         # where transcription is being written while recording is in progress.
@@ -156,12 +180,19 @@ class SessionRunner:
             logger.warning("Session stop timed out after 8s — forcing shutdown")
         except Exception:
             logger.exception("Error stopping session")
+
+        # Close WAV writer
+        if self._wav_writer:
+            self._wav_writer.close()
+            self._wav_writer = None
+
         self._notify_stopped()
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
     async def _status_loop(self) -> None:
-        """Periodically push segment count to JS."""
+        """Periodically push segment count and silence status to JS."""
+        was_silent = False
         while self._running:
             await asyncio.sleep(_UPDATE_INTERVAL_S)
             if self._window and self._running:
@@ -170,7 +201,14 @@ class SessionRunner:
                         f"updateSessionStatus({self._segment_count})"
                     )
                 except Exception:
-                    pass  # Window may be closed
+                    pass
+                if self._silence_monitor:
+                    if was_silent and not self._silence_monitor.is_silent:
+                        try:
+                            self._window.evaluate_js("updateSilenceStatus(0)")
+                        except Exception:
+                            pass
+                    was_silent = self._silence_monitor.is_silent
 
     async def _watchdog(self) -> None:
         """Monitor the session's audio loop — notify JS if it crashes."""
@@ -190,6 +228,44 @@ class SessionRunner:
                     logger.exception("Error during crash cleanup")
                 self._notify_error(f"Recording stopped unexpectedly: {exc}")
                 self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def _on_silence(self, elapsed_seconds: float) -> None:
+        """Handle silence detection — push to JS, auto-stop if enabled."""
+        if not self._window or not self._running:
+            return
+        secs = int(elapsed_seconds)
+        try:
+            self._window.evaluate_js(f"updateSilenceStatus({secs})")
+        except Exception:
+            pass
+        # Warning toast at ~100s
+        if 100 <= secs < 102:
+            try:
+                self._window.evaluate_js("onSilenceWarning()")
+            except Exception:
+                pass
+        # Auto-stop at 120s
+        if secs >= 120 and self._silence_auto_stop:
+            logger.info("Auto-stopping after %ds silence", secs)
+            self._running = False
+            asyncio.run_coroutine_threadsafe(self._stop_and_notify(), self._loop)
+
+    def _on_transcript_segment(self, segment: TranscriptSegment) -> None:
+        """Handle transcript segments — count and push to JS live preview."""
+        if segment.is_partial or not segment.text.strip():
+            return
+        self._segment_count += 1
+        text = segment.text.strip()
+        speaker_prefix = ""
+        if segment.speaker and segment.speaker != self._last_speaker:
+            speaker_prefix = f"[Speaker {segment.speaker}] "
+            self._last_speaker = segment.speaker
+        if self._window:
+            safe = (speaker_prefix + text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+            try:
+                self._window.evaluate_js(f'appendTranscript("{safe}")')
+            except Exception:
+                pass
 
     def _notify_stopped(self) -> None:
         """Tell the JS frontend that recording has stopped."""
