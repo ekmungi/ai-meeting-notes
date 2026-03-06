@@ -1,19 +1,21 @@
 /**
  * Manages note creation and live transcript updates in the vault.
  *
- * Creates a new note per recording (D025). Output format matches the desktop
- * MarkdownWriter (file-1.md format):
- *   - YAML frontmatter: date, start_time, engine, timestamp_mode, tags
- *   - Title:            # Meeting Notes — YYYY-MM-DD HH:MM  (em dash)
- *   - Section header:   ## Transcript
- *   - Timestamp markers **[HH:MM:SS]** every 5 minutes
+ * Two-file system: each recording creates a notes file (user-editable) and a
+ * transcript file (plugin-streamed). The notes file embeds the transcript via
+ * an Obsidian transclusion link. On stop, the transcript can optionally be
+ * merged inline and the separate file trashed.
+ *
+ * Output format matches the desktop MarkdownWriter (file-1.md format):
+ *   - Transcript file:   YAML frontmatter + ## Transcription heading
+ *   - Timestamp markers   **[HH:MM:SS]** every 5 minutes
  *   - Sentences grouped into paragraphs (new paragraph every 2 minutes)
  *   - Live partials in italic, replaced by final text when utterance ends
  *   - Footer: *Recording ended at ...* / *Duration: ...* / *Segments: ...*
  *
  * Concurrency: handleServerMessage() does not await onTranscript(), so
  * multiple calls can be in-flight. All in-memory state mutations happen
- * BEFORE any await. vault.process() is serialized by Obsidian — each
+ * BEFORE any await. vault.process() is serialized by Obsidian -- each
  * callback fully reconstructs file content from captured state, avoiding
  * any string-search or length-based truncation races.
  */
@@ -24,20 +26,20 @@ import type { MeetingNotesSettings, TranscriptMessage } from "./types";
 const PARA_INTERVAL_S = 120; // New paragraph every 2 minutes
 const TS_INTERVAL_S = 300;   // Timestamp marker every 5 minutes
 
-/** Format a Date as YYYY-MM-DD_HHmm for use in file names. */
+/** Format a Date as YYYYMMDD_HH-MM for use in file names. */
 function formatFileTimestamp(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `_${pad(date.getHours())}${pad(date.getMinutes())}`
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `_${pad(date.getHours())}-${pad(date.getMinutes())}`
   );
 }
 
 /**
- * Build YAML frontmatter + title matching the desktop MarkdownWriter format.
+ * Build the transcript file header: YAML frontmatter + ## Transcription.
  * Returns the complete header string (everything before the transcript body).
  */
-function buildHeader(engine: string, timestampMode: string, startTime: Date): string {
+function buildTranscriptHeader(engine: string, timestampMode: string, startTime: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   const date =
     `${startTime.getFullYear()}-` +
@@ -47,7 +49,6 @@ function buildHeader(engine: string, timestampMode: string, startTime: Date): st
     `${pad(startTime.getHours())}:` +
     `${pad(startTime.getMinutes())}:` +
     `${pad(startTime.getSeconds())}`;
-  const displayTime = `${pad(startTime.getHours())}:${pad(startTime.getMinutes())}`;
 
   return [
     "---",
@@ -55,12 +56,10 @@ function buildHeader(engine: string, timestampMode: string, startTime: Date): st
     `start_time: "${time}"`,
     `engine: ${engine}`,
     `timestamp_mode: ${timestampMode}`,
-    "tags: [meeting-notes]",
+    "tags: [meeting-transcript]",
     "---",
     "",
-    `# Meeting Notes \u2014 ${date} ${displayTime}`,
-    "",
-    "## Transcript",
+    "## Transcription",
     "",
   ].join("\n");
 }
@@ -69,12 +68,13 @@ export class TranscriptView {
   private app: App;
   private settings: MeetingNotesSettings;
   private file: TFile | null = null;
+  private transcriptFile: TFile | null = null;
   private startTime: Date | null = null;
 
   /**
    * Paragraph / timestamp state (mirrors MarkdownWriter).
    *
-   * The file content at any point is:
+   * The transcript file content at any point is:
    *   header (fixed) + completedContent + currentPara + partial
    *
    * completedContent: all finalized paragraphs and timestamp markers
@@ -97,8 +97,12 @@ export class TranscriptView {
     this.settings = settings;
   }
 
-  /** Create a new note for the recording and open it in the editor. */
-  async createNote(engine: string): Promise<TFile> {
+  /**
+   * Create two files for the recording and open them side-by-side.
+   * Returns the notes file (this.file). The transcript file is stored
+   * in this.transcriptFile and receives all streaming updates.
+   */
+  async createNote(engine: string, meetingType = "Meeting Notes"): Promise<TFile> {
     const now = new Date();
     this.startTime = now;
     this.headerLength = 0;
@@ -119,22 +123,96 @@ export class TranscriptView {
       throw new Error(`${folderPath} exists but is not a folder`);
     }
 
-    const fileName = `${formatFileTimestamp(now)} Meeting Notes.md`;
-    const filePath = normalizePath(`${folderPath}/${fileName}`);
+    const ts = formatFileTimestamp(now);
+    const baseName = `${ts} ${meetingType}`;
+    const transcriptBaseName = `${baseName}_transcript`;
 
-    const header = buildHeader(engine, this.settings.timestampMode, now);
-    this.file = await this.app.vault.create(filePath, header);
-    this.headerLength = header.length;
+    // Create transcript file
+    const transcriptPath = normalizePath(`${folderPath}/${transcriptBaseName}.md`);
+    const transcriptHeader = buildTranscriptHeader(engine, this.settings.timestampMode, now);
+    this.transcriptFile = await this.app.vault.create(transcriptPath, transcriptHeader);
+    this.headerLength = transcriptHeader.length;
 
-    const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.openFile(this.file);
+    // Create notes file
+    const notesPath = normalizePath(`${folderPath}/${baseName}.md`);
+    const notesContent = await this._buildNotesContent(meetingType, now, transcriptBaseName);
+    this.file = await this.app.vault.create(notesPath, notesContent);
+
+    // Open side-by-side: notes left, transcript right
+    const leftLeaf = this.app.workspace.getLeaf("tab");
+    await leftLeaf.openFile(this.file);
+
+    const rightLeaf = this.app.workspace.getLeaf("split", "vertical");
+    await rightLeaf.openFile(this.transcriptFile);
 
     return this.file;
   }
 
+  /**
+   * Build the notes file content from a user template or built-in default.
+   * Replaces {{meeting_type}}, {{date}}, {{transcript_embed}} variables.
+   */
+  private async _buildNotesContent(
+    typeName: string,
+    startTime: Date,
+    transcriptBaseName: string,
+  ): Promise<string> {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const dateStr =
+      `${startTime.getFullYear()}-` +
+      `${pad(startTime.getMonth() + 1)}-` +
+      `${pad(startTime.getDate())}`;
+    const embedLink = `![[${transcriptBaseName}]]`;
+
+    // Try loading user template
+    const templatePath = this.settings.meetingTemplatePath;
+    if (templatePath) {
+      const normalizedPath = normalizePath(templatePath);
+      const templateFile = this.app.vault.getAbstractFileByPath(normalizedPath);
+      if (templateFile instanceof TFile) {
+        const raw = await this.app.vault.read(templateFile);
+        let result = raw
+          .replace(/\{\{meeting_type\}\}/g, typeName)
+          .replace(/\{\{date\}\}/g, dateStr)
+          .replace(/\{\{transcript_embed\}\}/g, embedLink);
+
+        // If template has a ## Transcript section but no embed, insert it
+        if (result.includes("## Transcript") && !result.includes(embedLink)) {
+          result = result.replace(
+            /## Transcript\s*\n/,
+            `## Transcript\n${embedLink}\n`,
+          );
+        }
+
+        return result;
+      }
+    }
+
+    // Built-in default template
+    return [
+      "---",
+      `type: "${typeName}"`,
+      `date: ${dateStr}`,
+      "tags: [meeting-notes]",
+      "---",
+      "",
+      "## Notes",
+      "",
+      "",
+      "## Summary",
+      "",
+      "### Action Items",
+      "- ",
+      "",
+      "## Transcript",
+      embedLink,
+      "",
+    ].join("\n");
+  }
+
   /** Dispatch an incoming WebSocket transcript message. */
   async onTranscript(msg: TranscriptMessage): Promise<void> {
-    if (!this.file) return;
+    if (!this.file || !this.transcriptFile) return;
     if (!msg.text.trim()) return;
 
     if (msg.is_partial) {
@@ -146,7 +224,7 @@ export class TranscriptView {
 
   /** Finalize the note: flush remaining content and write the footer. */
   async finalize(durationSeconds: number): Promise<void> {
-    if (!this.file) return;
+    if (!this.transcriptFile) return;
 
     // Flush any in-progress paragraph (discard trailing partial)
     this.partial = "";
@@ -172,12 +250,69 @@ export class TranscriptView {
     const headerLen = this.headerLength;
     const finalBody = this.completedContent;
 
-    await this.app.vault.process(this.file, (content) => {
+    await this.app.vault.process(this.transcriptFile, (content) => {
       return content.slice(0, headerLen) + finalBody + footer;
     });
 
+    // Optionally merge transcript into notes and trash the separate file
+    if (this.settings.mergeTranscriptOnStop) {
+      await this._mergeTranscript();
+    }
+
     this.file = null;
+    this.transcriptFile = null;
     this.startTime = null;
+  }
+
+  /**
+   * Rename both files to reflect a new meeting type. Updates the embed link
+   * and frontmatter in the notes file to match.
+   */
+  async renameForType(meetingType: string): Promise<void> {
+    if (!this.file || !this.transcriptFile || !this.startTime) return;
+
+    const folder = this.settings.outputFolder || "Meetings";
+    const folderPath = normalizePath(folder);
+    const ts = formatFileTimestamp(this.startTime);
+
+    const newBaseName = `${ts} ${meetingType}`;
+    const newTranscriptBaseName = `${newBaseName}_transcript`;
+    const newTranscriptPath = normalizePath(`${folderPath}/${newTranscriptBaseName}.md`);
+    const newNotesPath = normalizePath(`${folderPath}/${newBaseName}.md`);
+
+    // Capture old transcript base name for embed replacement
+    const oldTranscriptBaseName = this.transcriptFile.basename;
+
+    // Rename transcript file first
+    await this.app.fileManager.renameFile(this.transcriptFile, newTranscriptPath);
+
+    // Update embed link and frontmatter type in notes file
+    await this.app.vault.process(this.file, (content) => {
+      return content
+        .replace(`![[${oldTranscriptBaseName}]]`, `![[${newTranscriptBaseName}]]`)
+        .replace(/^type:\s*".*"$/m, `type: "${meetingType}"`);
+    });
+
+    // Rename notes file
+    await this.app.fileManager.renameFile(this.file, newNotesPath);
+  }
+
+  /**
+   * Merge transcript content into the notes file, replacing the embed link,
+   * then trash the transcript file.
+   */
+  private async _mergeTranscript(): Promise<void> {
+    if (!this.file || !this.transcriptFile) return;
+
+    const transcriptContent = await this.app.vault.read(this.transcriptFile);
+    const transcriptBaseName = this.transcriptFile.basename;
+    const embedLink = `![[${transcriptBaseName}]]`;
+
+    await this.app.vault.process(this.file, (content) => {
+      return content.replace(embedLink, transcriptContent);
+    });
+
+    await this.app.vault.trash(this.transcriptFile, false);
   }
 
   /**
@@ -186,7 +321,7 @@ export class TranscriptView {
    * value immediately and do not double-write.
    */
   private async _writePartial(text: string): Promise<void> {
-    if (!this.file || !this.settings.showPartials) return;
+    if (!this.transcriptFile || !this.settings.showPartials) return;
 
     // Update state before yielding
     this.partial = `\n*${text}*`;
@@ -197,7 +332,7 @@ export class TranscriptView {
     const paraTexts = [...this.currentParaTexts];
     const capturedPartial = this.partial;
 
-    await this.app.vault.process(this.file, (content) => {
+    await this.app.vault.process(this.transcriptFile, (content) => {
       const header = content.slice(0, headerLen);
       const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
       return header + completed + para + capturedPartial;
@@ -209,7 +344,7 @@ export class TranscriptView {
    * then rewrites the current section via vault.process.
    */
   private async _writeFinal(text: string, timestampStart: number): Promise<void> {
-    if (!this.file) return;
+    if (!this.transcriptFile) return;
 
     // --- Synchronous state update (before any await) ---
     const elapsed = Math.max(0, timestampStart);
@@ -242,7 +377,7 @@ export class TranscriptView {
     const completed = this.completedContent;
     const paraTexts = [...this.currentParaTexts];
 
-    await this.app.vault.process(this.file, (content) => {
+    await this.app.vault.process(this.transcriptFile, (content) => {
       const header = content.slice(0, headerLen);
       const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
       return header + completed + para; // No partial
