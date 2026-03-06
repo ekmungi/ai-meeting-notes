@@ -398,6 +398,17 @@ body {
   transform: translateY(0);
 }
 
+.modal--small {
+  max-width: 400px;
+}
+
+.merge-dialog__hint {
+  font-size: 12px;
+  color: #888;
+  word-break: break-all;
+  margin-top: 8px;
+}
+
 .modal__header {
   display: flex;
   align-items: center;

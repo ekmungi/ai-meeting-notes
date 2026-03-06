@@ -113,6 +113,7 @@ class MeetingNotesAPI:
         self._runner = SessionRunner(
             config=config,
             window=self._window,
+            open_editor=settings.open_editor_on_start,
         )
 
         try:
@@ -144,6 +145,17 @@ class MeetingNotesAPI:
             return {"ok": True}
         except Exception as exc:
             logger.exception("Failed to stop recording")
+            return {"error": str(exc)}
+
+    def merge_notes(self) -> dict:
+        """Merge notes file with transcript after user confirms save."""
+        if not self._runner:
+            return {"error": "No recording session"}
+        try:
+            result = self._runner.merge_notes()
+            return {"ok": True, "path": result}
+        except Exception as exc:
+            logger.exception("Failed to merge notes")
             return {"error": str(exc)}
 
     def open_file(self, path: str) -> None:

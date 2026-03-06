@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from meeting_notes.audio.wav_writer import WavWriter
 from meeting_notes.config import Config
 from meeting_notes.engines.base import TranscriptSegment
 from meeting_notes.session import MeetingSession
+from meeting_notes.ui.merge import create_notes_file, merge_notes_with_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +31,7 @@ class SessionRunner:
     Status updates are pushed to the JS frontend via window.evaluate_js().
     """
 
-    def __init__(self, config: Config, window: Any) -> None:
+    def __init__(self, config: Config, window: Any, open_editor: bool = False) -> None:
         self._config = config
         self._window = window
         self._session: MeetingSession | None = None
@@ -42,6 +45,8 @@ class SessionRunner:
         self._wav_writer: WavWriter | None = None
         self._wav_path: str | None = None
         self._last_speaker: str | None = None
+        self._open_editor: bool = open_editor
+        self._notes_path: Path | None = None
 
     @property
     def is_running(self) -> bool:
@@ -106,6 +111,16 @@ class SessionRunner:
         self._running = False
         asyncio.run_coroutine_threadsafe(self._stop_and_notify(), self._loop)
 
+    def merge_notes(self) -> str | None:
+        """Merge notes file with transcript. Returns final path or None."""
+        if not self._notes_path or not self._output_path:
+            return self._output_path
+        result = merge_notes_with_transcript(
+            self._notes_path,
+            Path(self._output_path),
+        )
+        return str(result)
+
     def _run_loop(self) -> None:
         """Run the asyncio event loop on the background thread."""
         asyncio.set_event_loop(self._loop)
@@ -161,6 +176,23 @@ class SessionRunner:
             except Exception:
                 pass
 
+        # Launch editor for notes if enabled
+        if self._open_editor and output_path:
+            now = datetime.now()
+            notes_path = create_notes_file(
+                output_dir=output_path.parent,
+                meeting_type=self._config.meeting_type,
+                date_str=now.strftime("%Y-%m-%d"),
+                time_str=now.strftime("%H-%M"),
+            )
+            self._notes_path = notes_path
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, os.startfile, str(notes_path)  # noqa: S606
+                )
+            except Exception:
+                logger.warning("Failed to open editor for notes file", exc_info=True)
+
         return self._session._engine.name if self._session._engine else "Unknown"
 
     async def _stop_session(self) -> None:
@@ -185,6 +217,14 @@ class SessionRunner:
         if self._wav_writer:
             self._wav_writer.close()
             self._wav_writer = None
+
+        # If notes file exists, prompt user to merge
+        if self._notes_path and self._notes_path.exists() and self._window:
+            notes_js = str(self._notes_path).replace("\\", "\\\\")
+            try:
+                self._window.evaluate_js(f'onMergePrompt("{notes_js}")')
+            except Exception:
+                logger.warning("Failed to show merge dialog", exc_info=True)
 
         self._notify_stopped()
         if self._loop and self._loop.is_running():

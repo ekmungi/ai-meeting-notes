@@ -21,6 +21,10 @@ const elBtnSettingsCancel = document.getElementById("btn-settings-cancel");
 const elBtnBrowseOutput = document.getElementById("btn-browse-output");
 const elConsentCheck = document.getElementById("consent-check");
 const elToastContainer = document.getElementById("toast-container");
+const elMergeOverlay = document.getElementById("merge-overlay");
+const elMergeNotesPath = document.getElementById("merge-notes-path");
+const elBtnMerge = document.getElementById("btn-merge");
+const elBtnSkipMerge = document.getElementById("btn-skip-merge");
 
 // Settings inputs
 const elApiKey = document.getElementById("setting-api-key");
@@ -342,6 +346,38 @@ function appendTranscript(text) {
   el.appendChild(p);
   el.scrollTop = el.scrollHeight;
 }
+
+// -- Merge Dialog (called from Python when notes file needs merging) --
+
+function onMergePrompt(notesPath) {
+  if (elMergeNotesPath) {
+    elMergeNotesPath.textContent = notesPath;
+  }
+  if (elMergeOverlay) {
+    elMergeOverlay.classList.add("modal-overlay--open");
+  }
+}
+
+elBtnMerge.addEventListener("click", async () => {
+  try {
+    const result = await pywebview.api.merge_notes();
+    if (result.error) {
+      showToast("Merge failed: " + result.error, "error");
+    } else {
+      showToast("Notes merged with transcript", "success");
+    }
+  } catch (err) {
+    showToast("Merge error: " + err, "error");
+  }
+  elMergeOverlay.classList.remove("modal-overlay--open");
+  loadSessionHistory();
+});
+
+elBtnSkipMerge.addEventListener("click", () => {
+  elMergeOverlay.classList.remove("modal-overlay--open");
+  showToast("Merge skipped — notes file preserved", "info");
+  loadSessionHistory();
+});
 
 // -- Settings --
 
