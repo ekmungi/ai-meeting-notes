@@ -71,3 +71,48 @@ def test_frozen_settings_cannot_be_mutated():
     s = UserSettings()
     with pytest.raises(AttributeError):
         s.engine = "local"  # type: ignore[misc]
+
+
+def test_default_settings_new_fields():
+    """New parity fields should have sensible defaults."""
+    s = UserSettings()
+    assert s.meeting_types == ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+    assert s.silence_threshold_seconds == 15
+    assert s.silence_auto_stop is False
+    assert s.record_wav is False
+    assert s.speaker_labels is False
+    assert s.open_editor_on_start is True
+
+
+def test_save_and_load_roundtrip_new_fields(settings_dir: Path):
+    """New fields should survive save/load cycle."""
+    original = UserSettings(
+        meeting_types=["Custom Type"],
+        silence_threshold_seconds=30,
+        silence_auto_stop=True,
+        record_wav=True,
+        speaker_labels=True,
+        open_editor_on_start=False,
+    )
+    save_settings(original, settings_dir)
+    loaded = load_settings(settings_dir)
+    assert loaded.meeting_types == ["Custom Type"]
+    assert loaded.silence_threshold_seconds == 30
+    assert loaded.silence_auto_stop is True
+    assert loaded.record_wav is True
+    assert loaded.speaker_labels is True
+    assert loaded.open_editor_on_start is False
+
+
+def test_load_legacy_settings_missing_new_fields(settings_dir: Path):
+    """Legacy settings.json without new fields should load with defaults."""
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    path = settings_dir / "settings.json"
+    data = {"engine": "local", "assemblyai_api_key": "key-123"}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    s = load_settings(settings_dir)
+    assert s.engine == "local"
+    assert s.meeting_types == ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+    assert s.silence_threshold_seconds == 15
+    assert s.record_wav is False

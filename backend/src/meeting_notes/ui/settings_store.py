@@ -47,6 +47,24 @@ class UserSettings:
     # Recording
     endpointing: str = "conservative"
 
+    # Meeting types
+    meeting_types: list[str] = field(
+        default_factory=lambda: ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+    )
+
+    # Silence detection
+    silence_threshold_seconds: int = 15
+    silence_auto_stop: bool = False
+
+    # Audio recording
+    record_wav: bool = False
+
+    # Speaker labels (cloud only)
+    speaker_labels: bool = False
+
+    # Editor integration
+    open_editor_on_start: bool = True
+
     def replace(self, **kwargs) -> UserSettings:
         """Return a new UserSettings with the given fields replaced."""
         current = asdict(self)
