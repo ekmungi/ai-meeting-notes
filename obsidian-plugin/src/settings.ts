@@ -291,6 +291,18 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("Speaker labels")
+      .setDesc("Show speaker labels in the transcript (cloud engine only). Labels may occasionally be inconsistent in real-time mode.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableDiarization)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, enableDiarization: value };
+            await this.plugin.saveSettings();
+          })
+      );
+
     // --- Silence ---
     containerEl.createEl("h3", { text: "Silence Detection" });
 
