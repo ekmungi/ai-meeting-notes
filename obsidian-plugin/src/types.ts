@@ -15,6 +15,8 @@ export interface MeetingNotesSettings {
   meetingTemplatePath: string;
   mergeTranscriptOnStop: boolean;
   silenceTimerSeconds: number;
+  recordWav: boolean;
+  enableDiarization: boolean;
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -33,6 +35,8 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   meetingTemplatePath: "",
   mergeTranscriptOnStop: false,
   silenceTimerSeconds: 15,
+  recordWav: false,
+  enableDiarization: false,
 };
 
 /** Build the server base URL from port. */
@@ -84,6 +88,7 @@ export interface StopResponse {
   status: string;
   output_path: string;
   duration_seconds: number;
+  wav_path: string | null;
 }
 
 export interface PauseResponse {

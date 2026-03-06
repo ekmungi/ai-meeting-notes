@@ -228,6 +228,8 @@ export default class AIMeetingNotesPlugin extends Plugin {
         endpointing: this.settings.endpointing,
         local_model_size: this.settings.localModelSize,
         silence_threshold_seconds: this.settings.silenceTimerSeconds,
+        record_wav: this.settings.recordWav,
+        speaker_labels: this.settings.enableDiarization,
       };
 
       const resp = await requestUrl({
@@ -294,6 +296,10 @@ export default class AIMeetingNotesPlugin extends Plugin {
       }
 
       const data: StopResponse = resp.json;
+      // Add WAV reference BEFORE finalize (finalize nulls the file references)
+      if (data.wav_path && this.transcriptView) {
+        await this.transcriptView.addWavReference(data.wav_path);
+      }
       await this.transcriptView?.finalize(data.duration_seconds);
       this.stopElapsedTimer();
 

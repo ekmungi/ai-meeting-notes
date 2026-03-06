@@ -68,6 +68,7 @@ class CloudEngine(TranscriptionEngine):
         sample_rate: int = 16000,
         endpointing: str = "conservative",
         force_endpoint_interval: float = DEFAULT_FORCE_ENDPOINT_INTERVAL,
+        speaker_labels: bool = False,
     ):
         super().__init__()
         self._api_key = api_key
@@ -88,6 +89,7 @@ class CloudEngine(TranscriptionEngine):
         # merged with the next substantive segment rather than written alone.
         self._fragment_buffer: list[str] = []
         self._fragment_timestamp: float = 0.0
+        self._speaker_labels = speaker_labels
 
     @property
     def name(self) -> str:
@@ -207,7 +209,7 @@ class CloudEngine(TranscriptionEngine):
             is_partial=False,
         ))
 
-    def _handle_final_segment(self, text: str, elapsed: float) -> None:
+    def _handle_final_segment(self, text: str, elapsed: float, speaker: str | None = None) -> None:
         """Process a final (non-partial) segment, merging short fragments."""
         if self._is_fragment(text):
             if not self._fragment_buffer:
@@ -227,6 +229,7 @@ class CloudEngine(TranscriptionEngine):
                 timestamp_start=self._fragment_timestamp,
                 timestamp_end=elapsed,
                 is_partial=False,
+                speaker=speaker,
             ))
         else:
             self._emit(TranscriptSegment(
@@ -234,6 +237,7 @@ class CloudEngine(TranscriptionEngine):
                 timestamp_start=elapsed,
                 timestamp_end=elapsed,
                 is_partial=False,
+                speaker=speaker,
             ))
 
     def _audio_generator(self):
@@ -306,7 +310,9 @@ class CloudEngine(TranscriptionEngine):
                         #   2. turn_is_formatted=True   — formatted text, after NLP
                         # We only act on (2). Everything else is live preview only.
                         self._last_turn_end_time = time.monotonic()
-                        self._handle_final_segment(text, elapsed)
+                        # Extract speaker label if diarization is enabled
+                        speaker = getattr(event, "speaker", None)
+                        self._handle_final_segment(text, elapsed, speaker=speaker)
 
                     else:
                         # --- Live preview (partial OR unformatted end-of-turn) ---
@@ -356,13 +362,28 @@ class CloudEngine(TranscriptionEngine):
             preset = ENDPOINTING_PRESETS.get(self._endpointing, ENDPOINTING_PRESETS["conservative"])
             logger.info("Using endpointing preset: %s → %s", self._endpointing, preset)
 
-            client.connect(
-                StreamingParameters(
+            # Build streaming params, optionally enabling speaker diarization.
+            # The SDK's StreamingParameters does not yet have a speaker_labels
+            # field, so we subclass it to inject the query parameter.
+            if self._speaker_labels:
+                class _SpeakerParams(StreamingParameters):
+                    """Extends StreamingParameters with speaker_labels support."""
+                    speaker_labels: bool | None = None
+
+                params = _SpeakerParams(
+                    sample_rate=self._sample_rate,
+                    format_turns=True,
+                    speaker_labels=True,
+                    **preset,
+                )
+            else:
+                params = StreamingParameters(
                     sample_rate=self._sample_rate,
                     format_turns=True,
                     **preset,
                 )
-            )
+
+            client.connect(params)
 
             try:
                 client.stream(self._audio_generator())
