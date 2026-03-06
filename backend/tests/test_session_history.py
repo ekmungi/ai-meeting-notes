@@ -34,7 +34,7 @@ Some transcript text here.
 
 
 def test_parse_complete_session(tmp_path: Path):
-    fp = _write_session_file(tmp_path / "2026-02-17_1430 Meeting Notes.md")
+    fp = _write_session_file(tmp_path / "20260217_14-30 - Meeting Notes.md")
     info = _parse_session_file(fp)
     assert info is not None
     assert info["engine"] == "Cloud"
@@ -44,7 +44,7 @@ def test_parse_complete_session(tmp_path: Path):
 
 def test_parse_extracts_engine_name(tmp_path: Path):
     fp = _write_session_file(
-        tmp_path / "2026-02-17_1500 Meeting Notes.md",
+        tmp_path / "20260217_15-00 - Meeting Notes.md",
         engine="Local (faster-whisper small.en)",
     )
     info = _parse_session_file(fp)
@@ -52,7 +52,7 @@ def test_parse_extracts_engine_name(tmp_path: Path):
 
 
 def test_parse_missing_footer(tmp_path: Path):
-    fp = tmp_path / "2026-02-17_1600 Meeting Notes.md"
+    fp = tmp_path / "20260217_16-00 - Meeting Notes.md"
     fp.write_text("---\nengine: Cloud\n---\n\n# Meeting Notes\n\nSome text.\n",
                   encoding="utf-8")
     info = _parse_session_file(fp)
@@ -68,6 +68,6 @@ def test_parse_nonexistent_file(tmp_path: Path):
 
 
 def test_parse_uses_filename_as_title(tmp_path: Path):
-    fp = _write_session_file(tmp_path / "2026-02-17_1430 Meeting Notes.md")
+    fp = _write_session_file(tmp_path / "20260217_14-30 - Meeting Notes.md")
     info = _parse_session_file(fp)
-    assert info["title"] == "2026-02-17_1430 Meeting Notes"
+    assert info["title"] == "20260217_14-30 - Meeting Notes"

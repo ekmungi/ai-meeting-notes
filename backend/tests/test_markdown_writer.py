@@ -168,8 +168,68 @@ def test_writer_includes_speaker(tmp_output_dir: Path):
     writer.stop()
 
     content = writer.file_path.read_text(encoding="utf-8")
-    assert "**Speaker A:**" in content
+    assert "**[Speaker Speaker A]**" in content
     assert "Good morning" in content
+
+
+def test_writer_meeting_type_filename(tmp_output_dir: Path):
+    """Filename should use YYYYMMDD_HH-MM - Type format."""
+    writer = MarkdownWriter(
+        output_dir=tmp_output_dir, engine_name="test", meeting_type="Standup"
+    )
+    path = writer.start()
+    assert "Standup" in path.name
+    assert path.name.endswith(".md")
+    import re
+
+    assert re.match(r"\d{8}_\d{2}-\d{2} - Standup\.md", path.name)
+    writer.stop()
+
+
+def test_writer_default_meeting_type_filename(tmp_output_dir: Path):
+    """Default meeting type should produce 'Meeting Notes' filename."""
+    writer = MarkdownWriter(output_dir=tmp_output_dir, engine_name="test")
+    path = writer.start()
+    assert "Meeting Notes" in path.name
+    import re
+
+    assert re.match(r"\d{8}_\d{2}-\d{2} - Meeting Notes\.md", path.name)
+    writer.stop()
+
+
+def test_writer_speaker_label_format(tmp_output_dir: Path):
+    """Speaker labels should use **[Speaker X]** prefix format."""
+    writer = MarkdownWriter(output_dir=tmp_output_dir, engine_name="test")
+    writer.start()
+    writer.write_segment(
+        TranscriptSegment(
+            text="Hello everyone",
+            timestamp_start=0.0,
+            timestamp_end=1.0,
+            speaker="A",
+        )
+    )
+    writer.stop()
+    content = writer.file_path.read_text(encoding="utf-8")
+    assert "**[Speaker A]** Hello everyone" in content
+
+
+def test_writer_speaker_label_none_omitted(tmp_output_dir: Path):
+    """Segments without speaker should have no prefix."""
+    writer = MarkdownWriter(output_dir=tmp_output_dir, engine_name="test")
+    writer.start()
+    writer.write_segment(
+        TranscriptSegment(
+            text="Hello everyone",
+            timestamp_start=0.0,
+            timestamp_end=1.0,
+            speaker=None,
+        )
+    )
+    writer.stop()
+    content = writer.file_path.read_text(encoding="utf-8")
+    assert "**[Speaker" not in content
+    assert "Hello everyone" in content
 
 
 def test_only_final_segments_should_be_written(tmp_output_dir: Path):

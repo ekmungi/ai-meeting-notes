@@ -78,7 +78,7 @@ class MeetingNotesAPI:
 
         sessions = []
         # Glob for meeting note markdown files
-        pattern = "*Meeting Notes.md"
+        pattern = "*.md"
         files = sorted(output_dir.glob(pattern), reverse=True)
 
         for fp in files[:50]:  # Limit to 50 most recent

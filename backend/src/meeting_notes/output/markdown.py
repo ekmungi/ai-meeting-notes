@@ -35,6 +35,7 @@ class MarkdownWriter:
         output_dir: Path,
         engine_name: str = "",
         timestamp_mode: str = "elapsed",
+        meeting_type: str = "Meeting Notes",
         paragraph_interval_s: int = DEFAULT_PARAGRAPH_INTERVAL_S,
         timestamp_interval_s: int = DEFAULT_TIMESTAMP_INTERVAL_S,
     ):
@@ -45,6 +46,7 @@ class MarkdownWriter:
         self._output_dir = output_dir
         self._engine_name = engine_name
         self._timestamp_mode = timestamp_mode
+        self._meeting_type = meeting_type
         self._paragraph_interval_s = paragraph_interval_s
         self._timestamp_interval_s = timestamp_interval_s
         self._file_path: Path | None = None
@@ -66,7 +68,7 @@ class MarkdownWriter:
     def start(self) -> Path:
         """Create the markdown file and write the header."""
         self._start_time = datetime.now()
-        filename = self._start_time.strftime("%Y-%m-%d_%H%M") + " Meeting Notes.md"
+        filename = self._start_time.strftime("%Y%m%d_%H-%M") + f" - {self._meeting_type}.md"
         self._file_path = self._output_dir / filename
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +83,7 @@ class MarkdownWriter:
         self._file.write("tags: [meeting-notes]\n")
         self._file.write("---\n\n")
 
-        heading = self._start_time.strftime("# Meeting Notes — %Y-%m-%d %H:%M")
+        heading = self._start_time.strftime(f"# {self._meeting_type} — %Y-%m-%d %H:%M")
         self._file.write(f"{heading}\n\n")
         self._file.write("## Transcript\n\n")
         self._file.flush()
@@ -156,7 +158,7 @@ class MarkdownWriter:
 
         # Prepend speaker label if present
         if segment.speaker:
-            text = f"**{segment.speaker}:** {text}"
+            text = f"**[Speaker {segment.speaker}]** {text}"
 
         # Clamp to non-negative (local engine can produce slightly negative
         # timestamps when model load time > audio buffer duration)
