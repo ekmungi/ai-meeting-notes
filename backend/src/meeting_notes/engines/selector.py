@@ -37,10 +37,12 @@ def select_engine(config: Config, on_status=None) -> TranscriptionEngine:
 
 
 def _create_cloud_engine(config: Config) -> CloudEngine:
+    """Create a cloud engine with AssemblyAI streaming, passing speaker diarization config."""
     return CloudEngine(
         api_key=config.assemblyai_api_key,
         sample_rate=config.sample_rate,
         endpointing=config.endpointing,
+        speaker_labels=config.speaker_labels,
     )
 
 
