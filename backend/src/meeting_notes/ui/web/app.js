@@ -32,6 +32,15 @@ const elOutputDir = document.getElementById("setting-output-dir");
 const elTimestamps = document.getElementById("setting-timestamps");
 const elEndpointing = document.getElementById("setting-endpointing");
 const elModelSize = document.getElementById("setting-model-size");
+const elRecordWav = document.getElementById("setting-record-wav");
+const elSpeakerLabels = document.getElementById("setting-speaker-labels");
+const elOpenEditor = document.getElementById("setting-open-editor");
+const elSilenceThreshold = document.getElementById("setting-silence-threshold");
+const elSilenceThresholdValue = document.getElementById("silence-threshold-value");
+const elSilenceAutoStop = document.getElementById("setting-silence-auto-stop");
+const elMeetingTypesList = document.getElementById("meeting-types-list");
+const elNewMeetingType = document.getElementById("new-meeting-type");
+const elBtnAddType = document.getElementById("btn-add-type");
 
 // State
 let isRecording = false;
@@ -78,7 +87,58 @@ function applySettings(s) {
     elMeetingTypeSelect.appendChild(opt);
   });
 
+  // New settings
+  if (elRecordWav) elRecordWav.checked = s.record_wav || false;
+  if (elSpeakerLabels) elSpeakerLabels.checked = s.speaker_labels || false;
+  if (elOpenEditor) elOpenEditor.checked = s.open_editor_on_start !== false;
+  if (elSilenceThreshold) {
+    elSilenceThreshold.value = s.silence_threshold_seconds || 15;
+    elSilenceThresholdValue.textContent = (s.silence_threshold_seconds || 15) + "s";
+  }
+  if (elSilenceAutoStop) elSilenceAutoStop.checked = s.silence_auto_stop || false;
+
+  // Meeting types list in settings
+  renderMeetingTypes(s.meeting_types || ["Meeting Notes"]);
+
   updatePrivacyBadge(s.engine);
+}
+
+// Slider live update
+if (elSilenceThreshold) {
+  elSilenceThreshold.addEventListener("input", () => {
+    elSilenceThresholdValue.textContent = elSilenceThreshold.value + "s";
+  });
+}
+
+// Meeting type management state and rendering
+let currentMeetingTypes = [];
+
+function renderMeetingTypes(types) {
+  currentMeetingTypes = [...types];
+  if (!elMeetingTypesList) return;
+  elMeetingTypesList.innerHTML = "";
+  types.forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "meeting-type-row";
+    row.innerHTML =
+      '<span class="meeting-type-row__name">' + escapeHtml(t) + '</span>' +
+      '<button class="meeting-type-row__remove" data-index="' + i + '" title="Remove">&times;</button>';
+    row.querySelector(".meeting-type-row__remove").addEventListener("click", () => {
+      const updated = currentMeetingTypes.filter((_, idx) => idx !== i);
+      renderMeetingTypes(updated);
+    });
+    elMeetingTypesList.appendChild(row);
+  });
+}
+
+if (elBtnAddType) {
+  elBtnAddType.addEventListener("click", () => {
+    var val = elNewMeetingType.value.trim();
+    if (val && !currentMeetingTypes.includes(val)) {
+      renderMeetingTypes([...currentMeetingTypes, val]);
+      elNewMeetingType.value = "";
+    }
+  });
 }
 
 function updatePrivacyBadge(engine) {
@@ -403,6 +463,12 @@ elBtnSettingsSave.addEventListener("click", async () => {
     timestamp_mode: elTimestamps.value,
     endpointing: elEndpointing.value,
     local_model_size: elModelSize.value,
+    record_wav: elRecordWav ? elRecordWav.checked : false,
+    speaker_labels: elSpeakerLabels ? elSpeakerLabels.checked : false,
+    open_editor_on_start: elOpenEditor ? elOpenEditor.checked : true,
+    silence_threshold_seconds: elSilenceThreshold ? parseInt(elSilenceThreshold.value, 10) : 15,
+    silence_auto_stop: elSilenceAutoStop ? elSilenceAutoStop.checked : false,
+    meeting_types: currentMeetingTypes.length > 0 ? currentMeetingTypes : ["Meeting Notes"],
   };
 
   try {
@@ -411,6 +477,15 @@ elBtnSettingsSave.addEventListener("click", async () => {
     closeSettings();
     // Refresh engine badge
     updatePrivacyBadge(elEngineSelect.value);
+    // Re-populate meeting type dropdown with saved types
+    const types = settings.meeting_types;
+    elMeetingTypeSelect.innerHTML = "";
+    types.forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      elMeetingTypeSelect.appendChild(opt);
+    });
   } catch (err) {
     showToast("Failed to save settings: " + err, "error");
   }

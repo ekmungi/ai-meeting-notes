@@ -119,6 +119,48 @@
             <option value="medium.en">Medium — high accuracy, slow (~769 MB)</option>
           </select>
         </div>
+        <hr class="form-divider">
+        <h3 class="form-section-title">Recording</h3>
+        <div class="form-group">
+          <label class="form-checkbox-label">
+            <input type="checkbox" id="setting-record-wav" class="form-checkbox">
+            Save WAV recording (~1.9 MB/min)
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-checkbox-label">
+            <input type="checkbox" id="setting-speaker-labels" class="form-checkbox">
+            Enable speaker labels (cloud only)
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-checkbox-label">
+            <input type="checkbox" id="setting-open-editor" class="form-checkbox">
+            Open editor for notes on recording start
+          </label>
+        </div>
+        <hr class="form-divider">
+        <h3 class="form-section-title">Silence Detection</h3>
+        <div class="form-group">
+          <label for="setting-silence-threshold">Silence threshold (seconds)</label>
+          <input type="range" id="setting-silence-threshold" class="form-range" min="5" max="60" value="15">
+          <span id="silence-threshold-value" class="form-range-value">15s</span>
+        </div>
+        <div class="form-group">
+          <label class="form-checkbox-label">
+            <input type="checkbox" id="setting-silence-auto-stop" class="form-checkbox">
+            Auto-stop recording after 120s of silence
+          </label>
+        </div>
+        <hr class="form-divider">
+        <h3 class="form-section-title">Meeting Types</h3>
+        <div class="form-group">
+          <div id="meeting-types-list" class="meeting-types-list"></div>
+          <div class="form-row">
+            <input type="text" id="new-meeting-type" class="form-input form-input--wide" placeholder="Add new type...">
+            <button id="btn-add-type" class="form-btn-sm">Add</button>
+          </div>
+        </div>
       </div>
       <div class="modal__footer">
         <button id="btn-settings-save" class="form-btn">Save</button>
