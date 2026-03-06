@@ -1,67 +1,47 @@
-/* AI Meeting Notes — Frontend Logic */
+/* AI Meeting Notes — Core App Logic (recording, sessions, callbacks) */
+/* Depends on settings.js being loaded first for: escapeHtml, showToast,
+   applySettings, loadSessionHistory (defined here but shared),
+   elEngineSelect, elMeetingTypeSelect, updatePrivacyBadge */
 
 "use strict";
 
-// DOM references
-const elEngineSelect = document.getElementById("engine-select");
-const elMeetingTypeSelect = document.getElementById("meeting-type-select");
-const elBtnStart = document.getElementById("btn-start");
-const elBtnStop = document.getElementById("btn-stop");
-const elBtnSettings = document.getElementById("btn-settings");
-const elBtnMinimize = document.getElementById("btn-minimize");
-const elBtnClose = document.getElementById("btn-close");
-const elSessionList = document.getElementById("session-list");
-const elSessionEmpty = document.getElementById("session-empty");
-const elStatusText = document.getElementById("status-text");
-const elStatusPrivacy = document.getElementById("status-privacy");
-const elSettingsOverlay = document.getElementById("settings-overlay");
-const elBtnSettingsClose = document.getElementById("btn-settings-close");
-const elBtnSettingsSave = document.getElementById("btn-settings-save");
-const elBtnSettingsCancel = document.getElementById("btn-settings-cancel");
-const elBtnBrowseOutput = document.getElementById("btn-browse-output");
-const elConsentCheck = document.getElementById("consent-check");
-const elToastContainer = document.getElementById("toast-container");
-const elMergeOverlay = document.getElementById("merge-overlay");
-const elMergeNotesPath = document.getElementById("merge-notes-path");
-const elBtnMerge = document.getElementById("btn-merge");
-const elBtnSkipMerge = document.getElementById("btn-skip-merge");
+// -- DOM References (app-specific) --
 
-// Settings inputs
-const elApiKey = document.getElementById("setting-api-key");
-const elOutputDir = document.getElementById("setting-output-dir");
-const elTimestamps = document.getElementById("setting-timestamps");
-const elEndpointing = document.getElementById("setting-endpointing");
-const elModelSize = document.getElementById("setting-model-size");
-const elRecordWav = document.getElementById("setting-record-wav");
-const elSpeakerLabels = document.getElementById("setting-speaker-labels");
-const elOpenEditor = document.getElementById("setting-open-editor");
-const elSilenceThreshold = document.getElementById("setting-silence-threshold");
-const elSilenceThresholdValue = document.getElementById("silence-threshold-value");
-const elSilenceAutoStop = document.getElementById("setting-silence-auto-stop");
-const elMeetingTypesList = document.getElementById("meeting-types-list");
-const elNewMeetingType = document.getElementById("new-meeting-type");
-const elBtnAddType = document.getElementById("btn-add-type");
+var elBtnStart = document.getElementById("btn-start");
+var elBtnStop = document.getElementById("btn-stop");
+var elBtnMinimize = document.getElementById("btn-minimize");
+var elBtnClose = document.getElementById("btn-close");
+var elSessionList = document.getElementById("session-list");
+var elSessionEmpty = document.getElementById("session-empty");
+var elStatusText = document.getElementById("status-text");
+var elConsentCheck = document.getElementById("consent-check");
+var elMergeOverlay = document.getElementById("merge-overlay");
+var elMergeNotesPath = document.getElementById("merge-notes-path");
+var elBtnMerge = document.getElementById("btn-merge");
+var elBtnSkipMerge = document.getElementById("btn-skip-merge");
 
-// State
-let isRecording = false;
-let activeRowEl = null;
-let elapsedInterval = null;
-let recordingStartTime = null;
+// -- Recording State --
+
+var isRecording = false;
+var activeRowEl = null;
+var elapsedInterval = null;
+var recordingStartTime = null;
 
 // -- Initialization --
 
+/** Bootstrap the app: load settings, populate UI, load history. */
 async function init() {
   // Start with recording disabled until consent is given
   elBtnStart.disabled = true;
 
-  elConsentCheck.addEventListener("change", () => {
+  elConsentCheck.addEventListener("change", function () {
     if (!isRecording) {
       elBtnStart.disabled = !elConsentCheck.checked;
     }
   });
 
   try {
-    const settings = await pywebview.api.get_settings();
+    var settings = await pywebview.api.get_settings();
     applySettings(settings);
     await loadSessionHistory();
   } catch (err) {
@@ -69,106 +49,27 @@ async function init() {
   }
 }
 
-function applySettings(s) {
-  elEngineSelect.value = s.engine || "cloud";
-  elApiKey.value = s.assemblyai_api_key || "";
-  elOutputDir.value = s.output_dir || "";
-  elTimestamps.value = s.timestamp_mode || "elapsed";
-  elEndpointing.value = s.endpointing || "conservative";
-  elModelSize.value = s.local_model_size || "small.en";
-
-  // Populate meeting types dropdown
-  const types = s.meeting_types || ["Meeting Notes"];
-  elMeetingTypeSelect.innerHTML = "";
-  types.forEach(t => {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    elMeetingTypeSelect.appendChild(opt);
-  });
-
-  // New settings
-  if (elRecordWav) elRecordWav.checked = s.record_wav || false;
-  if (elSpeakerLabels) elSpeakerLabels.checked = s.speaker_labels || false;
-  if (elOpenEditor) elOpenEditor.checked = s.open_editor_on_start !== false;
-  if (elSilenceThreshold) {
-    elSilenceThreshold.value = s.silence_threshold_seconds || 15;
-    elSilenceThresholdValue.textContent = (s.silence_threshold_seconds || 15) + "s";
-  }
-  if (elSilenceAutoStop) elSilenceAutoStop.checked = s.silence_auto_stop || false;
-
-  // Meeting types list in settings
-  renderMeetingTypes(s.meeting_types || ["Meeting Notes"]);
-
-  updatePrivacyBadge(s.engine);
-}
-
-// Slider live update
-if (elSilenceThreshold) {
-  elSilenceThreshold.addEventListener("input", () => {
-    elSilenceThresholdValue.textContent = elSilenceThreshold.value + "s";
-  });
-}
-
-// Meeting type management state and rendering
-let currentMeetingTypes = [];
-
-function renderMeetingTypes(types) {
-  currentMeetingTypes = [...types];
-  if (!elMeetingTypesList) return;
-  elMeetingTypesList.innerHTML = "";
-  types.forEach((t, i) => {
-    const row = document.createElement("div");
-    row.className = "meeting-type-row";
-    row.innerHTML =
-      '<span class="meeting-type-row__name">' + escapeHtml(t) + '</span>' +
-      '<button class="meeting-type-row__remove" data-index="' + i + '" title="Remove">&times;</button>';
-    row.querySelector(".meeting-type-row__remove").addEventListener("click", () => {
-      const updated = currentMeetingTypes.filter((_, idx) => idx !== i);
-      renderMeetingTypes(updated);
-    });
-    elMeetingTypesList.appendChild(row);
-  });
-}
-
-if (elBtnAddType) {
-  elBtnAddType.addEventListener("click", () => {
-    var val = elNewMeetingType.value.trim();
-    if (val && !currentMeetingTypes.includes(val)) {
-      renderMeetingTypes([...currentMeetingTypes, val]);
-      elNewMeetingType.value = "";
-    }
-  });
-}
-
-function updatePrivacyBadge(engine) {
-  if (engine === "local") {
-    elStatusPrivacy.textContent = "Local: on-device processing";
-    elStatusPrivacy.className = "status-bar__privacy status-bar__privacy--local";
-  } else if (engine === "cloud") {
-    elStatusPrivacy.textContent = "Cloud: audio via AssemblyAI";
-    elStatusPrivacy.className = "status-bar__privacy status-bar__privacy--cloud";
-  } else {
-    elStatusPrivacy.textContent = "Auto: engine selected at start";
-    elStatusPrivacy.className = "status-bar__privacy";
-  }
-}
-
 // -- Session History --
 
+/** Fetch and render the session history list from the backend. */
 async function loadSessionHistory() {
   try {
-    const sessions = await pywebview.api.get_session_history();
+    var sessions = await pywebview.api.get_session_history();
     renderSessionList(sessions);
   } catch (err) {
     console.error("Failed to load session history:", err);
   }
 }
 
+/**
+ * Render an array of session objects into the session list.
+ * Preserves the active recording row if present.
+ * @param {Array} sessions - Session history entries from Python.
+ */
 function renderSessionList(sessions) {
   // Remove all non-active rows
-  const rows = elSessionList.querySelectorAll(".session-row:not(.session-row--active)");
-  rows.forEach(r => r.remove());
+  var rows = elSessionList.querySelectorAll(".session-row:not(.session-row--active)");
+  rows.forEach(function (r) { r.remove(); });
 
   if (sessions.length === 0 && !activeRowEl) {
     elSessionEmpty.hidden = false;
@@ -176,19 +77,18 @@ function renderSessionList(sessions) {
   }
   elSessionEmpty.hidden = true;
 
-  sessions.forEach(s => {
-    const row = document.createElement("div");
+  sessions.forEach(function (s) {
+    var row = document.createElement("div");
     row.className = "session-row session-row--new";
-    row.addEventListener("animationend", () => row.classList.remove("session-row--new"));
-    row.innerHTML = `
-      <div class="session-row__indicator"></div>
-      <div class="session-row__info">
-        <div class="session-row__title">${escapeHtml(s.title)}</div>
-        <div class="session-row__meta">${escapeHtml(s.engine)} | ${escapeHtml(s.segments)} segments</div>
-      </div>
-      <div class="session-row__duration">${escapeHtml(s.duration)}</div>
-    `;
-    row.addEventListener("dblclick", () => {
+    row.addEventListener("animationend", function () { row.classList.remove("session-row--new"); });
+    row.innerHTML =
+      '<div class="session-row__indicator"></div>' +
+      '<div class="session-row__info">' +
+        '<div class="session-row__title">' + escapeHtml(s.title) + '</div>' +
+        '<div class="session-row__meta">' + escapeHtml(s.engine) + ' | ' + escapeHtml(s.segments) + ' segments</div>' +
+      '</div>' +
+      '<div class="session-row__duration">' + escapeHtml(s.duration) + '</div>';
+    row.addEventListener("dblclick", function () {
       if (s.path) pywebview.api.open_file(s.path);
     });
     elSessionList.appendChild(row);
@@ -197,7 +97,7 @@ function renderSessionList(sessions) {
 
 // -- Recording Controls --
 
-elBtnStart.addEventListener("click", async () => {
+elBtnStart.addEventListener("click", async function () {
   if (isRecording) return;
   if (!elConsentCheck.checked) return;
 
@@ -206,9 +106,9 @@ elBtnStart.addEventListener("click", async () => {
   elStatusText.textContent = "Starting recording...";
 
   try {
-    const engine = elEngineSelect.value;
-    const meetingType = elMeetingTypeSelect.value;
-    const result = await pywebview.api.start_recording(engine, meetingType);
+    var engine = elEngineSelect.value;
+    var meetingType = elMeetingTypeSelect.value;
+    var result = await pywebview.api.start_recording(engine, meetingType);
     if (result.error) {
       showToast(result.error, "error");
       elBtnStart.disabled = false;
@@ -225,16 +125,16 @@ elBtnStart.addEventListener("click", async () => {
   }
 });
 
-elBtnStop.addEventListener("click", async () => {
+elBtnStop.addEventListener("click", async function () {
   if (!isRecording) return;
 
   isRecording = false;
   elBtnStop.disabled = true;
-  elBtnStart.disabled = true;  // Stay disabled until onRecordingStopped fires
+  elBtnStart.disabled = true;
   elStatusText.textContent = "Stopping... processing remaining audio";
 
   // Update active row to show stopping state
-  const titleEl = activeRowEl && activeRowEl.querySelector(".session-row__title");
+  var titleEl = activeRowEl && activeRowEl.querySelector(".session-row__title");
   if (titleEl) titleEl.textContent = "Stopping...";
 
   if (elapsedInterval) {
@@ -244,12 +144,16 @@ elBtnStop.addEventListener("click", async () => {
 
   try {
     await pywebview.api.stop_recording();
-    // Returns immediately — onRecordingStopped() will come from Python when done
+    // Returns immediately -- onRecordingStopped() will come from Python when done
   } catch (err) {
     showToast("Error stopping recording: " + err, "error");
   }
 });
 
+/**
+ * Transition UI to recording state.
+ * @param {string} engineName - Display name of the active engine.
+ */
 function onRecordingStarted(engineName) {
   isRecording = true;
   elBtnStart.disabled = true;
@@ -271,35 +175,40 @@ function onRecordingStarted(engineName) {
 
   activeRowEl = document.createElement("div");
   activeRowEl.className = "session-row session-row--active session-row--new";
-  activeRowEl.addEventListener("animationend", () => activeRowEl && activeRowEl.classList.remove("session-row--new"));
-  // Store engine name in data attribute so updateSessionStatus can rebuild correctly
-  activeRowEl.innerHTML = `
-    <div class="session-row__indicator"></div>
-    <div class="session-row__info">
-      <div class="session-row__title">Recording... <span class="session-row__engine">${escapeHtml(engineName)}</span></div>
-      <div class="session-row__meta" id="active-meta" data-engine="${escapeHtml(engineName)}">0 segments</div>
-    </div>
-    <div class="session-row__duration" id="active-duration">00:00</div>
-  `;
+  activeRowEl.addEventListener("animationend", function () {
+    if (activeRowEl) activeRowEl.classList.remove("session-row--new");
+  });
+  activeRowEl.innerHTML =
+    '<div class="session-row__indicator"></div>' +
+    '<div class="session-row__info">' +
+      '<div class="session-row__title">Recording... <span class="session-row__engine">' + escapeHtml(engineName) + '</span></div>' +
+      '<div class="session-row__meta" id="active-meta" data-engine="' + escapeHtml(engineName) + '">0 segments</div>' +
+    '</div>' +
+    '<div class="session-row__duration" id="active-duration">00:00</div>';
   elSessionList.insertBefore(activeRowEl, elSessionList.firstChild);
 
   // Start elapsed timer
   elapsedInterval = setInterval(updateElapsedTimer, 1000);
 }
 
+/** Update the elapsed time display on the active recording row. */
 function updateElapsedTimer() {
   if (!recordingStartTime) return;
-  const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-  const el = document.getElementById("active-duration");
+  var elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+  var el = document.getElementById("active-duration");
   if (el) el.textContent = formatElapsed(elapsed);
 }
 
-// Called from Python: pywebview.api -> evaluate_js
+// -- Python Callbacks (called via evaluate_js) --
+
+/**
+ * Update the segment count on the active recording row.
+ * @param {number} segmentCount - Current number of transcript segments.
+ */
 function updateSessionStatus(segmentCount) {
-  const el = document.getElementById("active-meta");
+  var el = document.getElementById("active-meta");
   if (el) {
-    // Preserve the filename hint if already shown, just update segment count
-    const fileName = el.dataset.filename || "";
+    var fileName = el.dataset.filename || "";
     if (fileName) {
       el.textContent = segmentCount + " segments | " + fileName;
     } else {
@@ -308,25 +217,34 @@ function updateSessionStatus(segmentCount) {
   }
 }
 
-// Called from Python to show engine status (model loading, transcribing, etc.)
+/**
+ * Show engine status message (model loading, transcribing, etc.).
+ * @param {string} message - Status text from Python.
+ */
 function updateEngineStatus(message) {
   if (elStatusText) {
     elStatusText.textContent = message;
   }
 }
 
-// Called from Python as soon as the output file is created (during recording)
+/**
+ * Called when the output file is created during recording.
+ * @param {string} filePath - Full path to the transcript file.
+ */
 function onRecordingFileReady(filePath) {
-  const meta = document.getElementById("active-meta");
+  var meta = document.getElementById("active-meta");
   if (meta) {
-    const fileName = filePath.split("\\").pop().split("/").pop();
-    meta.title = filePath;  // Full path on hover
+    var fileName = filePath.split("\\").pop().split("/").pop();
+    meta.title = filePath;
     meta.dataset.filename = fileName;
     meta.textContent = "Writing to: " + fileName;
   }
 }
 
-// Called from Python when recording has fully stopped (audio processed)
+/**
+ * Called when recording has fully stopped and audio is processed.
+ * @param {string|null} outputPath - Path to saved transcript, or null on error.
+ */
 function onRecordingStopped(outputPath) {
   isRecording = false;
   elConsentCheck.checked = false;
@@ -358,25 +276,36 @@ function onRecordingStopped(outputPath) {
   }
 }
 
-// Called from Python on engine crash
+/**
+ * Called on engine crash to show error and reset UI.
+ * @param {string} message - Error message from Python.
+ */
 function onRecordingError(message) {
   showToast(message, "error");
   onRecordingStopped(null);
 }
 
+/**
+ * Format total seconds into HH:MM:SS or MM:SS string.
+ * @param {number} totalSeconds - Elapsed seconds.
+ * @returns {string} Formatted time string.
+ */
 function formatElapsed(totalSeconds) {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
+  var h = Math.floor(totalSeconds / 3600);
+  var m = Math.floor((totalSeconds % 3600) / 60);
+  var s = totalSeconds % 60;
   if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
   }
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
 // -- Silence Detection Callbacks (called from Python) --
 
-// Called from Python when silence exceeds threshold
+/**
+ * Update status bar with silence duration.
+ * @param {number} seconds - Seconds of silence (0 = speech resumed).
+ */
 function updateSilenceStatus(seconds) {
   if (seconds > 0) {
     elStatusText.textContent = "Silence detected (" + seconds + "s)";
@@ -387,14 +316,17 @@ function updateSilenceStatus(seconds) {
   }
 }
 
-// Called from Python at 100s of silence
+/** Show a warning toast at 100s of silence. */
 function onSilenceWarning() {
   showToast("Extended silence detected. Recording will auto-stop at 120s.", "warning");
 }
 
 // -- Live Transcript Callback (called from Python) --
 
-// Called from Python with each final transcript segment
+/**
+ * Append a transcript line to the live preview panel.
+ * @param {string} text - Final transcript segment text.
+ */
 function appendTranscript(text) {
   var el = document.getElementById("transcript-body");
   var container = document.getElementById("transcript-preview");
@@ -409,6 +341,10 @@ function appendTranscript(text) {
 
 // -- Merge Dialog (called from Python when notes file needs merging) --
 
+/**
+ * Show the merge dialog with the notes file path.
+ * @param {string} notesPath - Path to the notes file to merge.
+ */
 function onMergePrompt(notesPath) {
   if (elMergeNotesPath) {
     elMergeNotesPath.textContent = notesPath;
@@ -418,9 +354,9 @@ function onMergePrompt(notesPath) {
   }
 }
 
-elBtnMerge.addEventListener("click", async () => {
+elBtnMerge.addEventListener("click", async function () {
   try {
-    const result = await pywebview.api.merge_notes();
+    var result = await pywebview.api.merge_notes();
     if (result.error) {
       showToast("Merge failed: " + result.error, "error");
     } else {
@@ -433,105 +369,22 @@ elBtnMerge.addEventListener("click", async () => {
   loadSessionHistory();
 });
 
-elBtnSkipMerge.addEventListener("click", () => {
+elBtnSkipMerge.addEventListener("click", function () {
   elMergeOverlay.classList.remove("modal-overlay--open");
-  showToast("Merge skipped — notes file preserved", "info");
+  showToast("Merge skipped -- notes file preserved", "info");
   loadSessionHistory();
 });
 
-// -- Settings --
+// -- Window Controls --
 
-elBtnMinimize.addEventListener("click", () => {
+elBtnMinimize.addEventListener("click", function () {
   pywebview.api.minimize_window();
 });
 
-elBtnClose.addEventListener("click", () => {
+elBtnClose.addEventListener("click", function () {
   pywebview.api.close_window();
 });
 
-elBtnSettings.addEventListener("click", () => {
-  elSettingsOverlay.classList.add("modal-overlay--open");
-});
+// -- Bootstrap --
 
-elBtnSettingsClose.addEventListener("click", closeSettings);
-elBtnSettingsCancel.addEventListener("click", closeSettings);
-
-elBtnSettingsSave.addEventListener("click", async () => {
-  const settings = {
-    assemblyai_api_key: elApiKey.value.trim(),
-    output_dir: elOutputDir.value.trim(),
-    timestamp_mode: elTimestamps.value,
-    endpointing: elEndpointing.value,
-    local_model_size: elModelSize.value,
-    record_wav: elRecordWav ? elRecordWav.checked : false,
-    speaker_labels: elSpeakerLabels ? elSpeakerLabels.checked : false,
-    open_editor_on_start: elOpenEditor ? elOpenEditor.checked : true,
-    silence_threshold_seconds: elSilenceThreshold ? parseInt(elSilenceThreshold.value, 10) : 15,
-    silence_auto_stop: elSilenceAutoStop ? elSilenceAutoStop.checked : false,
-    meeting_types: currentMeetingTypes.length > 0 ? currentMeetingTypes : ["Meeting Notes"],
-  };
-
-  try {
-    await pywebview.api.save_settings(settings);
-    showToast("Settings saved", "success");
-    closeSettings();
-    // Refresh engine badge
-    updatePrivacyBadge(elEngineSelect.value);
-    // Re-populate meeting type dropdown with saved types
-    const types = settings.meeting_types;
-    elMeetingTypeSelect.innerHTML = "";
-    types.forEach(t => {
-      const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = t;
-      elMeetingTypeSelect.appendChild(opt);
-    });
-  } catch (err) {
-    showToast("Failed to save settings: " + err, "error");
-  }
-});
-
-elBtnBrowseOutput.addEventListener("click", async () => {
-  try {
-    const dir = await pywebview.api.browse_directory();
-    if (dir) elOutputDir.value = dir;
-  } catch (err) {
-    console.error("Browse error:", err);
-  }
-});
-
-function closeSettings() {
-  elSettingsOverlay.classList.remove("modal-overlay--open");
-}
-
-elEngineSelect.addEventListener("change", () => {
-  updatePrivacyBadge(elEngineSelect.value);
-});
-
-// -- Toasts --
-
-function showToast(message, type) {
-  type = type || "info";
-  const toast = document.createElement("div");
-  toast.className = "toast toast--" + type;
-  toast.textContent = message;
-  elToastContainer.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transition = "opacity 0.3s ease";
-    setTimeout(() => toast.remove(), 300);
-  }, 4000);
-}
-
-// -- Utilities --
-
-function escapeHtml(str) {
-  if (!str) return "";
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-// Wait for pywebview API to be ready
 window.addEventListener("pywebviewready", init);
