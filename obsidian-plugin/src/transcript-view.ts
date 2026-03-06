@@ -91,6 +91,7 @@ export class TranscriptView {
   private lastTsBucket = -1;
   private partial = "";
   private segmentCount = 0;
+  private lastSpeaker: string | null = null;
 
   constructor(app: App, settings: MeetingNotesSettings) {
     this.app = app;
@@ -112,6 +113,7 @@ export class TranscriptView {
     this.lastTsBucket = -1;
     this.partial = "";
     this.segmentCount = 0;
+    this.lastSpeaker = null;
 
     const folder = this.settings.outputFolder || "Meetings";
     const folderPath = normalizePath(folder);
@@ -235,7 +237,7 @@ export class TranscriptView {
     if (msg.is_partial) {
       await this._writePartial(msg.text);
     } else {
-      await this._writeFinal(msg.text, msg.timestamp_start);
+      await this._writeFinal(msg.text, msg.timestamp_start, msg.speaker);
     }
   }
 
@@ -360,7 +362,7 @@ export class TranscriptView {
    * Write a final (non-partial) segment. Updates paragraph / timestamp state,
    * then rewrites the current section via vault.process.
    */
-  private async _writeFinal(text: string, timestampStart: number): Promise<void> {
+  private async _writeFinal(text: string, timestampStart: number, speaker: string | null = null): Promise<void> {
     if (!this.transcriptFile) return;
 
     // --- Synchronous state update (before any await) ---
@@ -385,7 +387,14 @@ export class TranscriptView {
       this.currentParaBucket = paraBucket;
     }
 
-    this.currentParaTexts.push(text);
+    // Prepend speaker label if speaker changed (show on change only, D043)
+    let displayText = text;
+    if (speaker && speaker !== this.lastSpeaker) {
+      displayText = `**[Speaker ${speaker}]** ${text}`;
+      this.lastSpeaker = speaker;
+    }
+
+    this.currentParaTexts.push(displayText);
     this.partial = ""; // Clear any pending partial
     this.segmentCount++;
 
