@@ -55,6 +55,12 @@ export default class AIMeetingNotesPlugin extends Plugin {
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
   private currentEngine = "";
 
+  // Silence tracking
+  private silentSeconds = 0;
+  private silenceNotice: Notice | null = null;
+  private silenceDismissed = false;
+  private silenceAutoStopTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Hover flyout
   private flyoutEl: HTMLElement | null = null;
   private flyoutActionEl: HTMLElement | null = null;
@@ -305,6 +311,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
       await this.serverLauncher.stop();
     }
 
+    this.silentSeconds = 0;
+    this.silenceDismissed = false;
+    this.silenceNotice?.hide();
+    this.silenceNotice = null;
+    if (this.silenceAutoStopTimer) {
+      clearTimeout(this.silenceAutoStopTimer);
+      this.silenceAutoStopTimer = null;
+    }
+
     this.setState("idle");
   }
 
@@ -361,7 +376,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
   private handleServerMessage(msg: ServerMessage): void {
     switch (msg.type) {
       case "transcript":
+        this.silentSeconds = 0;
         this.transcriptView?.onTranscript(msg);
+        break;
+      case "silence":
+        if ("silent_seconds" in msg) {
+          this.silentSeconds = (msg as { silent_seconds: number }).silent_seconds;
+          this.updateStatusBar();
+          this._handleSilenceAlert(this.silentSeconds);
+        }
         break;
       case "status":
         this.elapsedSeconds = msg.elapsed_seconds;
@@ -391,6 +414,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
       await this.serverLauncher.stop();
     }
 
+    this.silentSeconds = 0;
+    this.silenceDismissed = false;
+    this.silenceNotice?.hide();
+    this.silenceNotice = null;
+    if (this.silenceAutoStopTimer) {
+      clearTimeout(this.silenceAutoStopTimer);
+      this.silenceAutoStopTimer = null;
+    }
+
     this.setState("idle");
   }
 
@@ -413,6 +445,87 @@ export default class AIMeetingNotesPlugin extends Plugin {
       },
     );
     modal.open();
+  }
+
+  // --- Silence alerts ---
+
+  /** Evaluate whether to show or clear a silence alert based on duration. */
+  private _handleSilenceAlert(silentSeconds: number): void {
+    if (silentSeconds <= 0) {
+      this.silentSeconds = 0;
+      this.silenceDismissed = false;
+      if (this.silenceAutoStopTimer) {
+        clearTimeout(this.silenceAutoStopTimer);
+        this.silenceAutoStopTimer = null;
+      }
+      return;
+    }
+    if (silentSeconds >= 100 && !this.silenceNotice && !this.silenceDismissed) {
+      this._showSilenceNotice(silentSeconds);
+    }
+  }
+
+  /** Display an actionable silence warning notice with Extend/Dismiss/Stop buttons. */
+  private _showSilenceNotice(silentSeconds: number): void {
+    const frag = document.createDocumentFragment();
+
+    const textEl = document.createElement("div");
+    textEl.textContent = `No speech detected for ${Math.floor(silentSeconds)}s. Recording will auto-stop at 120s.`;
+    frag.appendChild(textEl);
+
+    const btnRow = document.createElement("div");
+    btnRow.style.display = "flex";
+    btnRow.style.gap = "8px";
+    btnRow.style.marginTop = "8px";
+
+    const extendBtn = document.createElement("button");
+    extendBtn.textContent = "Extend";
+    extendBtn.addEventListener("click", () => {
+      this.silentSeconds = 0;
+      this.silenceDismissed = false;
+      this.silenceNotice?.hide();
+      this.silenceNotice = null;
+      if (this.silenceAutoStopTimer) {
+        clearTimeout(this.silenceAutoStopTimer);
+        this.silenceAutoStopTimer = null;
+      }
+    });
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.textContent = "Dismiss";
+    dismissBtn.addEventListener("click", () => {
+      this.silenceDismissed = true;
+      this.silenceNotice?.hide();
+      this.silenceNotice = null;
+      if (this.silenceAutoStopTimer) {
+        clearTimeout(this.silenceAutoStopTimer);
+        this.silenceAutoStopTimer = null;
+      }
+    });
+
+    const stopBtn = document.createElement("button");
+    stopBtn.textContent = "Stop Recording";
+    stopBtn.addEventListener("click", () => {
+      this.silenceNotice?.hide();
+      this.silenceNotice = null;
+      this.stopRecording();
+    });
+
+    btnRow.appendChild(extendBtn);
+    btnRow.appendChild(dismissBtn);
+    btnRow.appendChild(stopBtn);
+    frag.appendChild(btnRow);
+
+    this.silenceNotice = new Notice(frag, 0);
+
+    // Auto-stop after 20s if the user does not interact
+    this.silenceAutoStopTimer = setTimeout(() => {
+      this.silenceNotice?.hide();
+      this.silenceNotice = null;
+      this.silenceAutoStopTimer = null;
+      new Notice("Auto-stopping: 120s of silence detected.", 5000);
+      this.stopRecording();
+    }, 20_000);
   }
 
   // --- UI updates ---
@@ -456,11 +569,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
     const timeStr = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 
     if (this.state === "recording") {
-      this.statusBarEl.setText(`${this.currentEngine} | ${timeStr}`);
+      const silenceInfo = this.silentSeconds > 0
+        ? ` | Silent ${Math.floor(this.silentSeconds)}s`
+        : "";
+      const dot = this.silentSeconds > 0 ? "\u{1F7E0}" : "\u{1F534}";
+      this.statusBarEl.setText(`${dot} ${this.currentEngine} | ${timeStr}${silenceInfo}`);
       this.statusBarEl.style.cursor = "pointer";
       this.statusBarEl.title = "Click to stop recording";
     } else if (this.state === "paused") {
-      this.statusBarEl.setText(`${this.currentEngine} | ${timeStr} (paused)`);
+      this.statusBarEl.setText(`\u{23F8}\u{FE0F} ${this.currentEngine} | ${timeStr} (paused)`);
       this.statusBarEl.style.cursor = "pointer";
       this.statusBarEl.title = "Click to stop recording";
     } else if (this.state === "starting") {
