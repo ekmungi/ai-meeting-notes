@@ -1,6 +1,11 @@
-# Example Project CLAUDE.md
+# AI Meeting Notes
 
-This is an example project-level CLAUDE.md file. Place this in your project root.
+## Plugin Priority
+
+| Layer | Skills |
+|-------|--------|
+| Primary | superpowers: TDD, systematic-debugging, writing-plans, brainstorming, verification |
+| Secondary | jeeves: product-management, meeting-prep, exec-comm |
 
 ## Project Overview
 
