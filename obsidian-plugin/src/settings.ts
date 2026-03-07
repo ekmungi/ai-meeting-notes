@@ -322,6 +322,27 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           })
       );
 
+    // --- Floating Indicator ---
+    containerEl.createEl("h3", { text: "Floating Recording Indicator" });
+
+    new Setting(containerEl)
+      .setName("Indicator position")
+      .setDesc("Where the floating recording indicator appears when Obsidian loses focus during recording.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("top-right", "Top Right")
+          .addOption("center-right", "Center Right")
+          .addOption("bottom-left", "Bottom Left")
+          .setValue(this.plugin.settings.floatingIndicatorPosition)
+          .onChange(async (value) => {
+            this.plugin.settings = {
+              ...this.plugin.settings,
+              floatingIndicatorPosition: value as "top-right" | "center-right" | "bottom-left",
+            };
+            await this.plugin.saveSettings();
+          })
+      );
+
     // --- Meeting Types ---
     containerEl.createEl("h3", { text: "Meeting Types" });
 

@@ -283,6 +283,14 @@ export class TranscriptView {
     this.startTime = null;
   }
 
+  /** Open and focus the notes file in the Obsidian workspace. */
+  navigateToNote(): void {
+    if (this.file) {
+      const leaf = this.app.workspace.getLeaf();
+      leaf.openFile(this.file);
+    }
+  }
+
   /**
    * Rename both files to reflect a new meeting type. Updates the embed link
    * and frontmatter in the notes file to match.
