@@ -116,3 +116,17 @@ def test_load_legacy_settings_missing_new_fields(settings_dir: Path):
     assert s.meeting_types == ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
     assert s.silence_threshold_seconds == 15
     assert s.record_wav is False
+
+
+def test_floating_indicator_position_default():
+    """Default floating indicator position is top-right."""
+    s = UserSettings()
+    assert s.floating_indicator_position == "top-right"
+
+
+def test_floating_indicator_position_persistence(tmp_path):
+    """Floating indicator position round-trips through save/load."""
+    s = UserSettings(floating_indicator_position="bottom-left")
+    save_settings(s, settings_dir=tmp_path)
+    loaded = load_settings(settings_dir=tmp_path)
+    assert loaded.floating_indicator_position == "bottom-left"

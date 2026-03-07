@@ -11,6 +11,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from meeting_notes.ui.floating_indicator import FloatingIndicator
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,9 +22,15 @@ class MeetingNotesAPI:
     def __init__(self) -> None:
         self._window = None
         self._runner: Any = None  # SessionRunner, set lazily
+        self._floating_indicator: FloatingIndicator | None = None
 
     def set_window(self, window) -> None:
+        """Set the main pywebview window and create the floating indicator."""
         self._window = window
+        self._floating_indicator = FloatingIndicator(
+            main_window=window,
+            on_stop=lambda: self.stop_recording(),
+        )
 
     # -- Window Controls --
 
@@ -118,6 +126,11 @@ class MeetingNotesAPI:
 
         try:
             engine_name = self._runner.start()
+
+            # Start floating indicator monitoring
+            if self._floating_indicator:
+                self._floating_indicator.start_monitoring(settings.floating_indicator_position)
+
             return {"engine_name": engine_name}
         except ImportError as exc:
             logger.exception("Missing dependency for recording")
@@ -142,6 +155,8 @@ class MeetingNotesAPI:
 
         try:
             self._runner.stop()
+            if self._floating_indicator:
+                self._floating_indicator.stop_monitoring()
             return {"ok": True}
         except Exception as exc:
             logger.exception("Failed to stop recording")
@@ -180,6 +195,8 @@ class MeetingNotesAPI:
 
     def cleanup(self) -> None:
         """Graceful shutdown — stop recording if active."""
+        if self._floating_indicator:
+            self._floating_indicator.stop_monitoring()
         if self._runner and self._runner.is_running:
             logger.info("Window closing during recording — stopping session")
             try:
