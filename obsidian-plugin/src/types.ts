@@ -17,6 +17,7 @@ export interface MeetingNotesSettings {
   silenceTimerSeconds: number;
   recordWav: boolean;
   enableDiarization: boolean;
+  floatingIndicatorPosition: "top-right" | "center-right" | "bottom-left";
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -37,6 +38,7 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   silenceTimerSeconds: 15,
   recordWav: false,
   enableDiarization: false,
+  floatingIndicatorPosition: "top-right",
 };
 
 /** Build the server base URL from port. */

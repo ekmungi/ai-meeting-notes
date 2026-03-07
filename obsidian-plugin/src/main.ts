@@ -30,6 +30,7 @@ import type {
 import { DEFAULT_SETTINGS, serverBaseUrl } from "./types";
 import { WsClient } from "./ws-client";
 import { decryptValue, encryptValue } from "./crypto";
+import { FloatingIndicator } from "./floating-indicator";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -61,6 +62,9 @@ export default class AIMeetingNotesPlugin extends Plugin {
   private silenceDismissed = false;
   private silenceAutoStopTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Floating recording indicator
+  private floatingIndicator: FloatingIndicator | null = null;
+
   // Hover flyout
   private flyoutEl: HTMLElement | null = null;
   private flyoutActionEl: HTMLElement | null = null;
@@ -89,6 +93,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
     this.updateStatusBar();
 
     this.addSettingTab(new MeetingNotesSettingTab(this.app, this));
+
+    this.floatingIndicator = new FloatingIndicator(this.app, {
+      onStop: () => this.stopRecording(),
+      onNavigate: () => {
+        if (this.transcriptView) {
+          this.transcriptView.navigateToNote();
+        }
+      },
+    });
 
     this.addCommand({
       id: "toggle-recording",
@@ -132,6 +145,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    this.floatingIndicator?.destroy();
     this.flyoutEl?.remove();
     this.flyoutEl = null;
     this.wsClient?.disconnect();
@@ -540,6 +554,13 @@ export default class AIMeetingNotesPlugin extends Plugin {
     this.state = state;
     this.updateRibbonIcon();
     this.updateStatusBar();
+
+    // Activate floating indicator when recording, deactivate otherwise
+    if (state === "recording" || state === "paused") {
+      this.floatingIndicator?.activate(this.settings.floatingIndicatorPosition);
+    } else {
+      this.floatingIndicator?.deactivate();
+    }
   }
 
   private updateRibbonIcon(): void {

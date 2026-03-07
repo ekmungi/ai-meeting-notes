@@ -60,6 +60,7 @@ var elOpenEditor = document.getElementById("setting-open-editor");
 var elSilenceThreshold = document.getElementById("setting-silence-threshold");
 var elSilenceThresholdValue = document.getElementById("silence-threshold-value");
 var elSilenceAutoStop = document.getElementById("setting-silence-auto-stop");
+var elIndicatorPosition = document.getElementById("setting-indicator-position");
 var elMeetingTypesList = document.getElementById("meeting-types-list");
 var elNewMeetingType = document.getElementById("new-meeting-type");
 var elBtnAddType = document.getElementById("btn-add-type");
@@ -154,6 +155,7 @@ function applySettings(s) {
     elSilenceThresholdValue.textContent = (s.silence_threshold_seconds || 15) + "s";
   }
   if (elSilenceAutoStop) elSilenceAutoStop.checked = s.silence_auto_stop || false;
+  if (elIndicatorPosition) elIndicatorPosition.value = s.floating_indicator_position || "top-right";
 
   // Meeting types list in settings
   renderMeetingTypes(s.meeting_types || ["Meeting Notes"]);
@@ -195,6 +197,7 @@ elBtnSettingsSave.addEventListener("click", async function () {
     open_editor_on_start: elOpenEditor ? elOpenEditor.checked : true,
     silence_threshold_seconds: elSilenceThreshold ? parseInt(elSilenceThreshold.value, 10) : 15,
     silence_auto_stop: elSilenceAutoStop ? elSilenceAutoStop.checked : false,
+    floating_indicator_position: elIndicatorPosition ? elIndicatorPosition.value : "top-right",
     meeting_types: currentMeetingTypes.length > 0 ? currentMeetingTypes : ["Meeting Notes"],
   };
 
