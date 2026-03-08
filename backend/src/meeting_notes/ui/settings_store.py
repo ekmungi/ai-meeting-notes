@@ -66,7 +66,7 @@ class UserSettings:
     open_editor_on_start: bool = True
 
     # Floating indicator
-    floating_indicator_position: str = "top-right"  # "top-right" | "center-right" | "bottom-left"
+    floating_indicator_position: str = "center-right"  # top-left|top-right|center-left|center-right|bottom-left|bottom-right
 
     def replace(self, **kwargs) -> UserSettings:
         """Return a new UserSettings with the given fields replaced."""

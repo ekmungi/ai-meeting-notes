@@ -17,10 +17,11 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 # Panel dimensions (vertical layout: 3 stacked circle buttons)
-# 3 buttons * 36px + 2 gaps * 6px + 2 padding * 8px = 136px
-PANEL_WIDTH = 52
-PANEL_HEIGHT = 136
-EDGE_MARGIN = 8
+# Width: 36px button + 4px padding each side = 44px
+# Height: 3 * 36px buttons + 2 * 4px gaps + 2 * 4px padding = 124px
+PANEL_WIDTH = 44
+PANEL_HEIGHT = 124
+EDGE_MARGIN = 0
 
 # Focus polling interval (seconds)
 _POLL_INTERVAL = 0.5
@@ -32,28 +33,23 @@ def calculate_position(
     """Calculate pixel coordinates for the indicator panel.
 
     Args:
-        position: One of "top-right", "center-right", "bottom-left".
+        position: Edge position string (e.g. "top-right", "center-left").
         screen_width: Screen width in pixels.
         screen_height: Screen height in pixels.
 
     Returns:
         Tuple of (x, y) coordinates for the top-left corner.
     """
+    center_y = (screen_height - PANEL_HEIGHT) // 2
     positions = {
-        "top-right": (
-            screen_width - PANEL_WIDTH - EDGE_MARGIN,
-            EDGE_MARGIN,
-        ),
-        "center-right": (
-            screen_width - PANEL_WIDTH - EDGE_MARGIN,
-            (screen_height - PANEL_HEIGHT) // 2,
-        ),
-        "bottom-left": (
-            EDGE_MARGIN,
-            screen_height - PANEL_HEIGHT - EDGE_MARGIN,
-        ),
+        "top-left": (EDGE_MARGIN, EDGE_MARGIN),
+        "top-right": (screen_width - PANEL_WIDTH - EDGE_MARGIN, EDGE_MARGIN),
+        "center-left": (EDGE_MARGIN, center_y),
+        "center-right": (screen_width - PANEL_WIDTH - EDGE_MARGIN, center_y),
+        "bottom-left": (EDGE_MARGIN, screen_height - PANEL_HEIGHT - EDGE_MARGIN),
+        "bottom-right": (screen_width - PANEL_WIDTH - EDGE_MARGIN, screen_height - PANEL_HEIGHT - EDGE_MARGIN),
     }
-    return positions.get(position, positions["top-right"])
+    return positions.get(position, positions["center-right"])
 
 
 def build_indicator_html() -> str:
@@ -70,11 +66,12 @@ def build_indicator_html() -> str:
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { background: transparent !important; overflow: hidden;
     -webkit-user-select: none; user-select: none;
-    width: 52px; height: 136px; }
+    width: 100%; height: 100%; }
   .mn-col {
     display: flex; flex-direction: column; align-items: center;
-    gap: 6px; background: #1e1e1e; border-radius: 26px;
-    padding: 8px 8px; width: 52px;
+    justify-content: center;
+    gap: 4px; background: #1e1e1e; border-radius: 22px;
+    padding: 4px; width: 100%; height: 100%;
     box-shadow: 0 4px 24px rgba(0,0,0,0.6);
   }
   .mn-btn {
@@ -179,7 +176,7 @@ class FloatingIndicator:
         self._float_window: Any = None
         self._poll_thread: threading.Thread | None = None
         self._polling = False
-        self._position = "top-right"
+        self._position = "center-right"
         self.is_visible = False
         self._main_hwnd_cache: int = 0
 
@@ -222,7 +219,7 @@ class FloatingIndicator:
                 "Failed to create floating indicator window", exc_info=True
             )
 
-    def start_monitoring(self, position: str = "top-right") -> None:
+    def start_monitoring(self, position: str = "center-right") -> None:
         """Start polling for main window focus loss.
 
         Args:

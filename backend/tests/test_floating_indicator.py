@@ -33,10 +33,10 @@ class TestCalculatePosition:
         assert x == EDGE_MARGIN
         assert y == 1080 - PANEL_HEIGHT - EDGE_MARGIN
 
-    def test_unknown_defaults_to_top_right(self):
-        """Unknown position string falls back to top-right."""
+    def test_unknown_defaults_to_center_right(self):
+        """Unknown position string falls back to center-right."""
         x, y = calculate_position("invalid", 1920, 1080)
-        expected_x, expected_y = calculate_position("top-right", 1920, 1080)
+        expected_x, expected_y = calculate_position("center-right", 1920, 1080)
         assert x == expected_x
         assert y == expected_y
 

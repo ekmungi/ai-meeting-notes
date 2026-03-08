@@ -155,7 +155,7 @@ function applySettings(s) {
     elSilenceThresholdValue.textContent = (s.silence_threshold_seconds || 15) + "s";
   }
   if (elSilenceAutoStop) elSilenceAutoStop.checked = s.silence_auto_stop || false;
-  if (elIndicatorPosition) elIndicatorPosition.value = s.floating_indicator_position || "top-right";
+  if (elIndicatorPosition) elIndicatorPosition.value = s.floating_indicator_position || "center-right";
 
   // Meeting types list in settings
   renderMeetingTypes(s.meeting_types || ["Meeting Notes"]);
