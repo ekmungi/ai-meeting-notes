@@ -1,7 +1,6 @@
 """Tests for floating recording indicator (desktop)."""
 
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from meeting_notes.ui.floating_indicator import (
     FloatingIndicator,
@@ -67,35 +66,57 @@ class TestFloatingIndicatorLifecycle:
         assert not fi.is_visible
 
     def test_show_sets_visible(self):
-        """show() marks indicator as visible."""
+        """show() marks indicator as visible when float_window exists."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
-        fi._create_window = MagicMock()
+        fi._float_window = MagicMock()
         fi.show()
         assert fi.is_visible
+        fi._float_window.show.assert_called_once()
 
     def test_hide_after_show(self):
         """hide() after show() returns to not visible."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
-        fi._create_window = MagicMock()
-        fi._destroy_window = MagicMock()
+        fi._float_window = MagicMock()
         fi.show()
         fi.hide()
         assert not fi.is_visible
+        fi._float_window.hide.assert_called_once()
 
     def test_show_when_already_visible_is_noop(self):
-        """Calling show() twice only creates window once."""
+        """Calling show() twice only calls window.show() once."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
-        fi._create_window = MagicMock()
+        fi._float_window = MagicMock()
         fi.show()
         fi.show()
-        assert fi._create_window.call_count == 1
+        assert fi._float_window.show.call_count == 1
 
     def test_hide_when_not_visible_is_noop(self):
-        """Calling hide() when not visible does not call destroy."""
+        """Calling hide() when not visible does not call window.hide()."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
-        fi._destroy_window = MagicMock()
+        fi._float_window = MagicMock()
         fi.hide()
-        fi._destroy_window.assert_not_called()
+        fi._float_window.hide.assert_not_called()
+
+    def test_show_without_float_window_is_noop(self):
+        """show() is a no-op when no float window has been created."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi.show()
+        assert not fi.is_visible
+
+    def test_show_moves_window_to_position(self):
+        """show() calls move() to reposition before showing."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._float_window = MagicMock()
+        fi._position = "bottom-left"
+        fi.show()
+        fi._float_window.move.assert_called_once()
+
+    def test_destroy_cleans_up(self):
+        """destroy() destroys the window and clears reference."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._float_window = MagicMock()
+        fi.destroy()
+        assert fi._float_window is None
 
 
 class TestFindProcessWindows:
@@ -150,19 +171,24 @@ class TestFloatingIndicatorMonitoring:
     def test_start_monitoring_creates_poll_thread(self):
         """start_monitoring() creates a background polling thread."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._float_window = MagicMock()
         fi._get_main_hwnd = MagicMock(return_value=12345)
-        fi._create_window = MagicMock()
         fi.start_monitoring("top-right")
         assert fi._poll_thread is not None
         assert fi._poll_thread.is_alive()
         fi.stop_monitoring()
 
+    def test_start_monitoring_without_window_is_noop(self):
+        """start_monitoring() without float window does not create thread."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi.start_monitoring("top-right")
+        assert fi._poll_thread is None
+
     def test_stop_monitoring_cleans_up(self):
         """stop_monitoring() stops the thread and hides the indicator."""
         fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._float_window = MagicMock()
         fi._get_main_hwnd = MagicMock(return_value=12345)
-        fi._create_window = MagicMock()
-        fi._destroy_window = MagicMock()
         fi.start_monitoring("center-right")
         fi.stop_monitoring()
         assert not fi._polling
@@ -180,6 +206,6 @@ class TestFloatingIndicatorMonitoring:
             main_window=MagicMock(),
             on_stop=lambda: stop_called.append(True),
         )
-        fi._destroy_window = MagicMock()
+        fi._float_window = MagicMock()
         fi._on_stop_and_hide()
         assert len(stop_called) == 1

@@ -251,7 +251,7 @@ class MeetingNotesAPI:
     def cleanup(self) -> None:
         """Graceful shutdown — stop recording if active."""
         if self._floating_indicator:
-            self._floating_indicator.stop_monitoring()
+            self._floating_indicator.destroy()
         if self._runner and self._runner.is_running:
             logger.info("Window closing during recording — stopping session")
             try:

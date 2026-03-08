@@ -86,6 +86,11 @@ def main() -> None:
 
     api.set_window(window)
 
+    # Create the floating indicator window (hidden) before start() so
+    # pywebview creates it on the GUI thread.  show()/hide() are thread-safe.
+    if api._floating_indicator:
+        api._floating_indicator.create_hidden_window()
+
     # Register cleanup on window close
     def on_closing():
         logger.debug("Window closing — cleaning up")

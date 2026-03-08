@@ -1,8 +1,8 @@
-"""Floating recording indicator -- always-on-top mini panel for desktop app (D051).
+"""Floating recording indicator -- always-on-top mini panel for desktop app.
 
 Shows a small panel with Stop and Transcript buttons when the main window
-loses focus during an active recording. Uses pywebview's create_window
-with on_top=True and frameless=True.
+loses focus during an active recording. The window is created once at
+startup (hidden) and toggled via show/hide for thread safety.
 """
 
 from __future__ import annotations
@@ -173,8 +173,9 @@ class _FloatAPI:
 class FloatingIndicator:
     """Manages a floating always-on-top indicator window for the desktop app.
 
-    Shows a small panel with Stop and Transcript buttons. Monitors main
-    window focus via win32 polling and auto-shows/hides accordingly.
+    The window is created once at startup (hidden=True) so it lives on the
+    GUI thread.  show()/hide() toggle visibility from any thread.  Focus
+    polling detects when the main window loses/gains focus.
     """
 
     def __init__(self, main_window: Any, on_stop: Callable[[], None]) -> None:
@@ -187,12 +188,53 @@ class FloatingIndicator:
         self.is_visible = False
         self._main_hwnd_cache: int = 0
 
+    def create_hidden_window(self) -> None:
+        """Create the floating window in a hidden state.
+
+        Must be called BEFORE webview.start() so that pywebview creates
+        the window on the GUI thread.  The window stays hidden until
+        show() is called.
+        """
+        try:
+            import webview  # type: ignore[import-untyped]
+
+            screen_w, screen_h = _get_screen_size()
+            x, y = calculate_position(self._position, screen_w, screen_h)
+
+            api = _FloatAPI(
+                on_stop=self._on_stop_and_hide,
+                on_navigate=self._navigate_and_hide,
+            )
+
+            self._float_window = webview.create_window(
+                title="Recording",
+                html=build_indicator_html(),
+                js_api=api,
+                width=PANEL_WIDTH,
+                height=PANEL_HEIGHT,
+                x=x,
+                y=y,
+                on_top=True,
+                frameless=True,
+                resizable=False,
+                minimizable=False,
+                hidden=True,
+            )
+            logger.info("Floating indicator window created (hidden)")
+        except Exception:
+            logger.warning(
+                "Failed to create floating indicator window", exc_info=True
+            )
+
     def start_monitoring(self, position: str = "top-right") -> None:
         """Start polling for main window focus loss.
 
         Args:
             position: Screen edge for the indicator panel.
         """
+        if not self._float_window:
+            logger.warning("No floating window — skipping monitoring")
+            return
         self._position = position
         self._polling = True
         self._poll_thread = threading.Thread(
@@ -211,69 +253,53 @@ class FloatingIndicator:
             self._poll_thread = None
 
     def show(self) -> None:
-        """Create and show the floating indicator window."""
-        if self.is_visible:
+        """Show the floating indicator window at the configured position."""
+        if self.is_visible or not self._float_window:
             return
         self.is_visible = True
-        self._create_window()
-
-    def hide(self) -> None:
-        """Destroy the floating indicator window."""
-        if not self.is_visible:
-            return
-        self.is_visible = False
-        self._destroy_window()
-
-    def _create_window(self) -> None:
-        """Create the pywebview floating window."""
         try:
-            import webview  # type: ignore[import-untyped]
-
+            # Move to configured position before showing
             screen_w, screen_h = _get_screen_size()
             x, y = calculate_position(self._position, screen_w, screen_h)
-
-            def _navigate_and_hide() -> None:
-                """Bring main window to front and hide indicator."""
-                self.hide()
-                if self._main_window:
-                    try:
-                        self._main_window.restore()
-                        # Brief on_top toggle to bring window to front
-                        self._main_window.on_top = True
-                        self._main_window.on_top = False
-                    except Exception:
-                        pass
-
-            api = _FloatAPI(
-                on_stop=self._on_stop_and_hide,
-                on_navigate=_navigate_and_hide,
-            )
-
-            self._float_window = webview.create_window(
-                title="Recording",
-                html=build_indicator_html(),
-                js_api=api,
-                width=PANEL_WIDTH,
-                height=PANEL_HEIGHT,
-                x=x,
-                y=y,
-                on_top=True,
-                frameless=True,
-                resizable=False,
-                minimizable=False,
-            )
+            self._float_window.move(x, y)
+            self._float_window.show()
+            logger.debug("Floating indicator shown at %s", self._position)
         except Exception:
-            logger.warning("Failed to create floating indicator window", exc_info=True)
+            logger.warning("Failed to show floating indicator", exc_info=True)
             self.is_visible = False
 
-    def _destroy_window(self) -> None:
-        """Destroy the pywebview floating window."""
+    def hide(self) -> None:
+        """Hide the floating indicator window."""
+        if not self.is_visible or not self._float_window:
+            return
+        self.is_visible = False
+        try:
+            self._float_window.hide()
+            logger.debug("Floating indicator hidden")
+        except Exception:
+            logger.warning("Failed to hide floating indicator", exc_info=True)
+
+    def destroy(self) -> None:
+        """Permanently destroy the floating window (app shutdown)."""
+        self.stop_monitoring()
         if self._float_window:
             try:
                 self._float_window.destroy()
             except Exception:
                 pass
             self._float_window = None
+
+    def _navigate_and_hide(self) -> None:
+        """Bring main window to front and hide indicator."""
+        self.hide()
+        if self._main_window:
+            try:
+                self._main_window.restore()
+                # Brief on_top toggle to bring window to front
+                self._main_window.on_top = True
+                self._main_window.on_top = False
+            except Exception:
+                pass
 
     def _on_stop_and_hide(self) -> None:
         """Handle stop button: stop recording and hide indicator."""
@@ -284,13 +310,18 @@ class FloatingIndicator:
         """Poll for main window focus state on a background thread.
 
         Compares GetForegroundWindow against the main window HWND.
-        Shows the indicator when main window loses focus, hides when it regains.
+        Shows the indicator when main window loses focus, hides when
+        it regains.
         """
+        # Wait briefly for windows to fully initialize
+        time.sleep(1.0)
+
         main_hwnd = self._get_main_hwnd()
         if not main_hwnd:
             logger.warning("Could not get main window HWND for focus polling")
             return
 
+        logger.info("Focus polling started, main HWND=%s", main_hwnd)
         was_focused = True
         while self._polling:
             time.sleep(_POLL_INTERVAL)
@@ -346,7 +377,7 @@ class FloatingIndicator:
     def _get_main_hwnd(self) -> int:
         """Get the HWND of the main pywebview window.
 
-        Caches the result on first successful lookup. Uses win32
+        Caches the result on first successful lookup.  Uses win32
         EnumWindows to find the first visible window in our process.
 
         Returns:
