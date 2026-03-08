@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   showPartials: true,
   localModelSize: "small.en",
   disclaimerAccepted: false,
-  meetingTypes: ["1:1", "Standup", "Weekly Sync", "Design Review", "Interview", "All Hands"],
+  meetingTypes: ["One to One", "Standup", "Weekly Sync", "Design Review", "Interview", "All Hands"],
   meetingTemplatePath: "",
   mergeTranscriptOnStop: false,
   silenceTimerSeconds: 15,

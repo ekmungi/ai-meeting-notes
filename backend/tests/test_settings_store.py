@@ -76,7 +76,7 @@ def test_frozen_settings_cannot_be_mutated():
 def test_default_settings_new_fields():
     """New parity fields should have sensible defaults."""
     s = UserSettings()
-    assert s.meeting_types == ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+    assert s.meeting_types == ["Meeting Notes", "One to One", "Standup", "Weekly Sync", "Design Review"]
     assert s.silence_threshold_seconds == 15
     assert s.silence_auto_stop is False
     assert s.record_wav is False
@@ -113,7 +113,7 @@ def test_load_legacy_settings_missing_new_fields(settings_dir: Path):
 
     s = load_settings(settings_dir)
     assert s.engine == "local"
-    assert s.meeting_types == ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+    assert s.meeting_types == ["Meeting Notes", "One to One", "Standup", "Weekly Sync", "Design Review"]
     assert s.silence_threshold_seconds == 15
     assert s.record_wav is False
 

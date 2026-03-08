@@ -33,7 +33,6 @@ export class FloatingIndicator {
   private callbacks: IndicatorCallbacks;
   private position: IndicatorPosition = "top-right";
   private popoutLeaf: WorkspaceLeaf | null = null;
-  private mainWindow: any = null;
   private boundOnBlur: (() => void) | null = null;
   private boundOnFocus: (() => void) | null = null;
   private isVisible = false;
@@ -80,35 +79,27 @@ export class FloatingIndicator {
 
   // --- Private: Focus Listeners ---
 
-  /** Register blur/focus listeners on the main Obsidian Electron window. */
+  /** Register blur/focus listeners on the DOM window.
+   *
+   * Uses standard DOM events instead of Electron remote API, which
+   * was removed in Electron 22+ and is unavailable in modern Obsidian.
+   */
   private _registerFocusListeners(): void {
-    try {
-      const remote = (window as any).require("@electron/remote");
-      if (!remote) return;
-      this.mainWindow = remote.getCurrentWindow();
-      if (!this.mainWindow) return;
+    this.boundOnBlur = () => {
+      if (this.isActive) this.show();
+    };
+    this.boundOnFocus = () => {
+      this.hide();
+    };
 
-      this.boundOnBlur = () => {
-        if (this.isActive) this.show();
-      };
-      this.boundOnFocus = () => {
-        this.hide();
-      };
-
-      this.mainWindow.on("blur", this.boundOnBlur);
-      this.mainWindow.on("focus", this.boundOnFocus);
-    } catch (err) {
-      console.warn("FloatingIndicator: Electron remote not available:", err);
-    }
+    window.addEventListener("blur", this.boundOnBlur);
+    window.addEventListener("focus", this.boundOnFocus);
   }
 
-  /** Remove blur/focus listeners from the main Electron window. */
+  /** Remove blur/focus listeners from the DOM window. */
   private _removeFocusListeners(): void {
-    if (this.mainWindow) {
-      if (this.boundOnBlur) this.mainWindow.removeListener("blur", this.boundOnBlur);
-      if (this.boundOnFocus) this.mainWindow.removeListener("focus", this.boundOnFocus);
-    }
-    this.mainWindow = null;
+    if (this.boundOnBlur) window.removeEventListener("blur", this.boundOnBlur);
+    if (this.boundOnFocus) window.removeEventListener("focus", this.boundOnFocus);
     this.boundOnBlur = null;
     this.boundOnFocus = null;
   }

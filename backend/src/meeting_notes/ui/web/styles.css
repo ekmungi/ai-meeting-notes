@@ -141,7 +141,12 @@ body {
 .action-row__btn--start {
   background: var(--accent-red);
   color: #fff;
-  flex: 1;
+  width: 40px;
+  height: 36px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-row__btn--start:hover:not(:disabled) {
@@ -152,6 +157,12 @@ body {
   background: var(--bg-surface);
   color: var(--text-primary);
   border: 1px solid var(--border);
+  width: 36px;
+  height: 36px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-row__btn--pause:hover:not(:disabled) {
@@ -162,6 +173,12 @@ body {
   background: var(--bg-surface);
   color: var(--text-primary);
   border: 1px solid var(--border);
+  width: 36px;
+  height: 36px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-row__btn--stop:hover:not(:disabled) {
@@ -301,9 +318,86 @@ body {
   animation: rowSlideIn 0.2s ease forwards;
 }
 
+/* Session row document icon */
+.session-row__icon {
+  font-size: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Hover action buttons container */
+.session-row__actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition);
+  flex-shrink: 0;
+}
+
+.session-row:hover .session-row__actions {
+  opacity: 1;
+}
+
+.session-row:hover .session-row__duration {
+  display: none;
+}
+
+/* Don't hide duration or show actions on active recording row */
+.session-row--active:hover .session-row__duration {
+  display: block;
+}
+
+.session-row--active .session-row__actions {
+  display: none;
+}
+
+.session-row__action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.session-row__action-btn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.session-row__action-btn--delete:hover {
+  color: var(--accent-red);
+}
+
+/* Slide-out animation for deleted rows */
+@keyframes rowSlideOut {
+  from { opacity: 1; transform: translateX(0); max-height: 60px; }
+  to { opacity: 0; transform: translateX(-100%); max-height: 0; margin-bottom: 0; padding: 0; }
+}
+
+.session-row--deleting {
+  animation: rowSlideOut 0.3s ease forwards;
+  overflow: hidden;
+}
+
 /* Silence detection */
 .status-bar__text--silence {
   color: #D4A017;
+}
+
+@keyframes statusFlash {
+  0% { color: var(--accent-green); }
+  100% { color: var(--text-secondary); }
+}
+
+.status-bar__text--started {
+  animation: statusFlash 1.5s ease;
 }
 
 .toast--warning {
@@ -375,7 +469,9 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -638,6 +734,27 @@ body {
   border-color: var(--accent-amber);
 }
 
+.toast--info {
+  border-color: var(--accent-blue);
+}
+
+.toast__undo {
+  background: transparent;
+  border: 1px solid var(--text-secondary);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 8px;
+  white-space: nowrap;
+  transition: background var(--transition);
+}
+
+.toast__undo:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -659,4 +776,13 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* Loading spinner for async operations */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.action-row__btn--loading i {
+  animation: spin 0.8s linear infinite;
 }

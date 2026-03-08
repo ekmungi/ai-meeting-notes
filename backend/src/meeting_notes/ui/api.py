@@ -206,6 +206,46 @@ class MeetingNotesAPI:
         else:
             subprocess.Popen(["xdg-open", str(resolved)])  # noqa: S603, S607
 
+    def delete_session(self, path: str) -> dict:
+        """Move a session markdown file (and matching WAV/transcript) to the recycle bin.
+
+        Validates that the path is an existing .md file before deleting.
+        Also trashes matching WAV and transcript files if they exist.
+
+        Args:
+            path: Absolute path to the markdown file.
+
+        Returns:
+            Dict with 'ok': True on success, or 'error' message.
+        """
+        from pathlib import Path as _Path
+        resolved = _Path(path).resolve()
+
+        if not resolved.is_file():
+            return {"error": "File not found"}
+        if resolved.suffix.lower() != ".md":
+            return {"error": "Only markdown files can be deleted"}
+
+        try:
+            from send2trash import send2trash
+
+            send2trash(str(resolved))
+
+            # Also trash matching WAV file if it exists
+            wav_path = resolved.with_suffix(".wav")
+            if wav_path.is_file():
+                send2trash(str(wav_path))
+
+            # Also trash matching transcript file
+            transcript_path = resolved.parent / (resolved.stem + "_transcript.md")
+            if transcript_path.is_file():
+                send2trash(str(transcript_path))
+
+            return {"ok": True}
+        except Exception as exc:
+            logger.exception("Failed to delete session file")
+            return {"error": str(exc)}
+
     # -- Cleanup --
 
     def cleanup(self) -> None:

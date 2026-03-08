@@ -7,7 +7,48 @@ from pathlib import Path
 import pytest
 
 from meeting_notes.engines.base import TranscriptSegment
-from meeting_notes.output.markdown import MarkdownWriter
+from meeting_notes.output.markdown import MarkdownWriter, sanitize_filename
+
+
+# ---------------------------------------------------------------------------
+# Filename sanitization
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeFilename:
+    """Test sanitize_filename strips illegal Windows characters."""
+
+    def test_clean_name_unchanged(self):
+        """Normal text passes through unchanged."""
+        assert sanitize_filename("Standup") == "Standup"
+
+    def test_colon_replaced(self):
+        """Colon (illegal on Windows) is replaced with hyphen."""
+        assert sanitize_filename("1:1") == "1-1"
+
+    def test_multiple_illegal_chars(self):
+        """Multiple illegal characters are each replaced."""
+        assert sanitize_filename('a<b>c:d"e') == "a-b-c-d-e"
+
+    def test_consecutive_hyphens_collapsed(self):
+        """Multiple replacement hyphens collapse to one."""
+        assert sanitize_filename("a::b") == "a-b"
+
+    def test_empty_returns_default(self):
+        """Empty string falls back to Meeting Notes."""
+        assert sanitize_filename("") == "Meeting Notes"
+
+    def test_all_illegal_returns_default(self):
+        """String of only illegal chars falls back to default."""
+        assert sanitize_filename(":::") == "Meeting Notes"
+
+    def test_spaces_preserved(self):
+        """Spaces within the name are preserved."""
+        assert sanitize_filename("One to One") == "One to One"
+
+    def test_question_mark_replaced(self):
+        """Question mark (illegal on Windows) is replaced."""
+        assert sanitize_filename("What?") == "What"
 
 
 # ---------------------------------------------------------------------------

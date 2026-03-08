@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import threading
 import time
 from typing import Any, Callable
@@ -184,6 +185,7 @@ class FloatingIndicator:
         self._polling = False
         self._position = "top-right"
         self.is_visible = False
+        self._main_hwnd_cache: int = 0
 
     def start_monitoring(self, position: str = "top-right") -> None:
         """Start polling for main window focus loss.
@@ -307,32 +309,70 @@ class FloatingIndicator:
                 self.show()
                 was_focused = False
 
+    def _find_process_windows(self) -> list[int]:
+        """Find all visible top-level window HWNDs for the current process.
+
+        Uses win32 EnumWindows + GetWindowThreadProcessId to reliably
+        locate windows regardless of pywebview backend internals.
+
+        Returns:
+            List of HWNDs belonging to this process.
+        """
+        try:
+            user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            pid = os.getpid()
+            hwnds: list[int] = []
+
+            # WNDENUMPROC callback type: (HWND, LPARAM) -> BOOL
+            WNDENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p
+            )
+
+            def _enum_callback(hwnd: int, _lparam: int) -> bool:
+                window_pid = ctypes.c_ulong()
+                user32.GetWindowThreadProcessId(
+                    hwnd, ctypes.byref(window_pid)
+                )
+                if window_pid.value == pid and user32.IsWindowVisible(hwnd):
+                    hwnds.append(hwnd)
+                return True
+
+            user32.EnumWindows(WNDENUMPROC(_enum_callback), 0)
+            return hwnds
+        except Exception:
+            logger.debug("EnumWindows failed", exc_info=True)
+            return []
+
     def _get_main_hwnd(self) -> int:
         """Get the HWND of the main pywebview window.
 
+        Caches the result on first successful lookup. Uses win32
+        EnumWindows to find the first visible window in our process.
+
         Returns:
             Window handle, or 0 if unavailable.
         """
-        try:
-            if hasattr(self._main_window, "gui") and self._main_window.gui:
-                return int(self._main_window.gui.BrowserView.Handle)
-        except Exception:
-            pass
+        if self._main_hwnd_cache:
+            return self._main_hwnd_cache
+        hwnds = self._find_process_windows()
+        if hwnds:
+            self._main_hwnd_cache = hwnds[0]
+            return hwnds[0]
         return 0
 
     def _get_float_hwnd(self) -> int:
-        """Get the HWND of the float pywebview window.
+        """Get the HWND of the floating indicator window.
+
+        Enumerates process windows and returns the first one that
+        is not the cached main window HWND.
 
         Returns:
             Window handle, or 0 if unavailable.
         """
-        try:
-            if (
-                self._float_window
-                and hasattr(self._float_window, "gui")
-                and self._float_window.gui
-            ):
-                return int(self._float_window.gui.BrowserView.Handle)
-        except Exception:
-            pass
+        if not self._main_hwnd_cache:
+            return 0
+        hwnds = self._find_process_windows()
+        for hwnd in hwnds:
+            if hwnd != self._main_hwnd_cache:
+                return hwnd
         return 0

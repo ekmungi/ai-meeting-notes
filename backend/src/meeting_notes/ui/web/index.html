@@ -40,11 +40,17 @@
     <select id="meeting-type-select" class="action-row__select">
       <option value="Meeting Notes">Meeting Notes</option>
     </select>
-    <button id="btn-start" class="action-row__btn action-row__btn--start">Start Recording</button>
-    <button id="btn-pause" class="action-row__btn action-row__btn--pause" disabled>Pause</button>
-    <button id="btn-stop" class="action-row__btn action-row__btn--stop" disabled>Stop</button>
+    <button id="btn-start" class="action-row__btn action-row__btn--start" title="Start Recording">
+      <i class="ph-fill ph-play" id="start-icon"></i>
+    </button>
+    <button id="btn-pause" class="action-row__btn action-row__btn--pause" title="Pause Recording" disabled>
+      <i class="ph-fill ph-pause" id="pause-icon"></i>
+    </button>
+    <button id="btn-stop" class="action-row__btn action-row__btn--stop" title="Stop Recording" disabled>
+      <i class="ph-fill ph-stop" id="stop-icon"></i>
+    </button>
     <button id="btn-settings" class="action-row__btn action-row__btn--settings" title="Settings">
-      <i class="ph ph-sliders-horizontal"></i>
+      <i class="ph ph-gear-six"></i>
     </button>
   </div>
 

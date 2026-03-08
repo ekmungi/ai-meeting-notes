@@ -20,6 +20,9 @@ var elMergeOverlay = document.getElementById("merge-overlay");
 var elMergeNotesPath = document.getElementById("merge-notes-path");
 var elBtnMerge = document.getElementById("btn-merge");
 var elBtnSkipMerge = document.getElementById("btn-skip-merge");
+var elStartIcon = document.getElementById("start-icon");
+var elPauseIcon = document.getElementById("pause-icon");
+var elStopIcon = document.getElementById("stop-icon");
 
 // -- Recording State --
 
@@ -85,13 +88,26 @@ function renderSessionList(sessions) {
     row.className = "session-row session-row--new";
     row.addEventListener("animationend", function () { row.classList.remove("session-row--new"); });
     row.innerHTML =
-      '<div class="session-row__indicator"></div>' +
+      '<i class="ph ph-file-text session-row__icon"></i>' +
       '<div class="session-row__info">' +
         '<div class="session-row__title">' + escapeHtml(s.title) + '</div>' +
       '</div>' +
-      '<div class="session-row__duration">' + escapeHtml(s.duration) + '</div>';
-    row.addEventListener("dblclick", function () {
+      '<div class="session-row__duration">' + escapeHtml(s.duration) + '</div>' +
+      '<div class="session-row__actions">' +
+        '<button class="session-row__action-btn session-row__action-btn--open" title="Open in editor">' +
+          '<i class="ph ph-arrow-square-out"></i>' +
+        '</button>' +
+        '<button class="session-row__action-btn session-row__action-btn--delete" title="Move to recycle bin">' +
+          '<i class="ph ph-trash"></i>' +
+        '</button>' +
+      '</div>';
+    row.querySelector(".session-row__action-btn--open").addEventListener("click", function (e) {
+      e.stopPropagation();
       if (s.path) pywebview.api.open_file(s.path);
+    });
+    row.querySelector(".session-row__action-btn--delete").addEventListener("click", function (e) {
+      e.stopPropagation();
+      deleteSession(row, s.path, s.title);
     });
     elSessionList.appendChild(row);
   });
@@ -104,7 +120,8 @@ elBtnStart.addEventListener("click", async function () {
   if (!elConsentCheck.checked) return;
 
   elBtnStart.disabled = true;
-  elBtnStart.textContent = "Starting...";
+  elStartIcon.className = "ph ph-spinner";
+  elBtnStart.classList.add("action-row__btn--loading");
   elStatusText.textContent = "Starting recording...";
 
   try {
@@ -114,7 +131,8 @@ elBtnStart.addEventListener("click", async function () {
     if (result.error) {
       showToast(result.error, "error");
       elBtnStart.disabled = false;
-      elBtnStart.textContent = "Start Recording";
+      elStartIcon.className = "ph-fill ph-play";
+      elBtnStart.classList.remove("action-row__btn--loading");
       elStatusText.textContent = "Ready";
       return;
     }
@@ -122,7 +140,8 @@ elBtnStart.addEventListener("click", async function () {
   } catch (err) {
     showToast("Failed to start recording: " + err, "error");
     elBtnStart.disabled = false;
-    elBtnStart.textContent = "Start Recording";
+    elStartIcon.className = "ph-fill ph-play";
+    elBtnStart.classList.remove("action-row__btn--loading");
     elStatusText.textContent = "Ready";
   }
 });
@@ -136,7 +155,8 @@ elBtnPause.addEventListener("click", async function () {
       return;
     }
     isPaused = result.paused;
-    elBtnPause.textContent = isPaused ? "Resume" : "Pause";
+    elPauseIcon.className = isPaused ? "ph-fill ph-play" : "ph-fill ph-pause";
+    elBtnPause.title = isPaused ? "Resume Recording" : "Pause Recording";
     elStatusText.textContent = isPaused ? "Recording paused" : "Recording in progress";
     if (isPaused) {
       pausedElapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
@@ -186,9 +206,11 @@ function onRecordingStarted(engineName) {
   isPaused = false;
   pausedElapsed = 0;
   elBtnStart.disabled = true;
-  elBtnStart.textContent = "Recording...";
+  elStartIcon.className = "ph-fill ph-play";
+  elBtnStart.classList.remove("action-row__btn--loading");
   elBtnPause.disabled = false;
-  elBtnPause.textContent = "Pause";
+  elPauseIcon.className = "ph-fill ph-pause";
+  elBtnPause.title = "Pause Recording";
   elBtnStop.disabled = false;
   elEngineSelect.disabled = true;
   elMeetingTypeSelect.disabled = true;
@@ -220,6 +242,10 @@ function onRecordingStarted(engineName) {
 
   // Start elapsed timer
   elapsedInterval = setInterval(updateElapsedTimer, 1000);
+
+  // Brief green flash on status text
+  elStatusText.classList.add("status-bar__text--started");
+  setTimeout(function () { elStatusText.classList.remove("status-bar__text--started"); }, 1500);
 }
 
 /** Update the elapsed time display on the active recording row. */
@@ -281,9 +307,11 @@ function onRecordingStopped(outputPath) {
   isPaused = false;
   elConsentCheck.checked = false;
   elBtnStart.disabled = true;
-  elBtnStart.textContent = "Start Recording";
+  elStartIcon.className = "ph-fill ph-play";
+  elBtnStart.classList.remove("action-row__btn--loading");
   elBtnPause.disabled = true;
-  elBtnPause.textContent = "Pause";
+  elPauseIcon.className = "ph-fill ph-pause";
+  elBtnPause.title = "Pause Recording";
   elBtnStop.disabled = true;
   elEngineSelect.disabled = false;
   elMeetingTypeSelect.disabled = false;
@@ -332,6 +360,55 @@ function formatElapsed(totalSeconds) {
     return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
   }
   return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+// -- Session Delete with Undo --
+
+/**
+ * Delete a session file with undo support.
+ * Animates the row out, shows undo toast for 5 seconds, then calls API.
+ * @param {HTMLElement} rowEl - The session row DOM element.
+ * @param {string} path - File path to delete.
+ * @param {string} title - Session title for the toast.
+ */
+function deleteSession(rowEl, path, title) {
+  rowEl.classList.add("session-row--deleting");
+
+  var undone = false;
+  var toastEl = document.createElement("div");
+  toastEl.className = "toast toast--info";
+  toastEl.innerHTML =
+    '<span>Deleted &quot;' + escapeHtml(title) + '&quot;</span>' +
+    '<button class="toast__undo">Undo</button>';
+
+  var container = document.getElementById("toast-container");
+  container.appendChild(toastEl);
+
+  toastEl.querySelector(".toast__undo").addEventListener("click", function () {
+    undone = true;
+    rowEl.classList.remove("session-row--deleting");
+    toastEl.remove();
+  });
+
+  setTimeout(async function () {
+    toastEl.remove();
+    if (undone) return;
+
+    try {
+      var result = await pywebview.api.delete_session(path);
+      if (result.error) {
+        showToast("Delete failed: " + result.error, "error");
+        rowEl.classList.remove("session-row--deleting");
+      } else {
+        rowEl.remove();
+        var remaining = elSessionList.querySelectorAll(".session-row");
+        if (remaining.length === 0) elSessionEmpty.hidden = false;
+      }
+    } catch (err) {
+      showToast("Delete error: " + err, "error");
+      rowEl.classList.remove("session-row--deleting");
+    }
+  }, 5000);
 }
 
 // -- Silence Detection Callbacks (called from Python) --
@@ -417,6 +494,42 @@ elBtnMinimize.addEventListener("click", function () {
 
 elBtnClose.addEventListener("click", function () {
   pywebview.api.close_window();
+});
+
+// -- Keyboard Shortcuts --
+
+document.addEventListener("keydown", function (e) {
+  var tag = document.activeElement && document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+  if (e.key === "Escape") {
+    if (elMergeOverlay.classList.contains("modal-overlay--open")) {
+      elMergeOverlay.classList.remove("modal-overlay--open");
+      return;
+    }
+    if (elSettingsOverlay.classList.contains("modal-overlay--open")) {
+      closeSettings();
+      return;
+    }
+  }
+
+  if (e.code === "Space" && isRecording) {
+    e.preventDefault();
+    elBtnPause.click();
+    return;
+  }
+
+  if (e.key === "Enter" && !isRecording && elConsentCheck.checked) {
+    e.preventDefault();
+    elBtnStart.click();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    elSettingsOverlay.classList.add("modal-overlay--open");
+    return;
+  }
 });
 
 // -- Bootstrap --

@@ -35,6 +35,15 @@ function formatFileTimestamp(date: Date): string {
   );
 }
 
+/** Remove characters illegal in Windows/Obsidian filenames. */
+function sanitizeFilename(name: string): string {
+  const sanitized = name
+    .replace(/[<>:"/\\|?*]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[- ]+|[- ]+$/g, "");
+  return sanitized || "Meeting Notes";
+}
+
 /**
  * Build the transcript file header: YAML frontmatter + ## Transcript.
  * Returns the complete header string (everything before the transcript body).
@@ -124,7 +133,8 @@ export class TranscriptView {
     }
 
     const ts = formatFileTimestamp(now);
-    const baseName = `${ts} ${meetingType}`;
+    const safeType = sanitizeFilename(meetingType);
+    const baseName = `${ts} ${safeType}`;
     const transcriptBaseName = `${baseName}_transcript`;
 
     // Create transcript file
@@ -302,7 +312,8 @@ export class TranscriptView {
     const folderPath = normalizePath(folder);
     const ts = formatFileTimestamp(this.startTime);
 
-    const newBaseName = `${ts} ${meetingType}`;
+    const safeType = sanitizeFilename(meetingType);
+    const newBaseName = `${ts} ${safeType}`;
     const newTranscriptBaseName = `${newBaseName}_transcript`;
     const newTranscriptPath = normalizePath(`${folderPath}/${newTranscriptBaseName}.md`);
     const newNotesPath = normalizePath(`${folderPath}/${newBaseName}.md`);

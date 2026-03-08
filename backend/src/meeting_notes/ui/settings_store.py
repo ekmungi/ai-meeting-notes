@@ -49,7 +49,7 @@ class UserSettings:
 
     # Meeting types
     meeting_types: list[str] = field(
-        default_factory=lambda: ["Meeting Notes", "1:1", "Standup", "Weekly Sync", "Design Review"]
+        default_factory=lambda: ["Meeting Notes", "One to One", "Standup", "Weekly Sync", "Design Review"]
     )
 
     # Silence detection

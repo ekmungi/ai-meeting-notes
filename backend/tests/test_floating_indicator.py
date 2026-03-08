@@ -1,6 +1,7 @@
 """Tests for floating recording indicator (desktop)."""
 
-from unittest.mock import MagicMock
+import os
+from unittest.mock import MagicMock, patch
 
 from meeting_notes.ui.floating_indicator import (
     FloatingIndicator,
@@ -95,6 +96,52 @@ class TestFloatingIndicatorLifecycle:
         fi._destroy_window = MagicMock()
         fi.hide()
         fi._destroy_window.assert_not_called()
+
+
+class TestFindProcessWindows:
+    """Test win32 HWND lookup via EnumWindows."""
+
+    def test_find_process_windows_returns_list(self):
+        """_find_process_windows returns a list (may be empty in test env)."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        result = fi._find_process_windows()
+        assert isinstance(result, list)
+
+    def test_get_main_hwnd_caches_result(self):
+        """_get_main_hwnd caches the first successful lookup."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._find_process_windows = MagicMock(return_value=[99999])
+        hwnd1 = fi._get_main_hwnd()
+        hwnd2 = fi._get_main_hwnd()
+        assert hwnd1 == 99999
+        assert hwnd2 == 99999
+        # Only called once due to caching
+        assert fi._find_process_windows.call_count == 1
+
+    def test_get_main_hwnd_returns_zero_when_no_windows(self):
+        """_get_main_hwnd returns 0 when no process windows found."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._find_process_windows = MagicMock(return_value=[])
+        assert fi._get_main_hwnd() == 0
+
+    def test_get_float_hwnd_excludes_main(self):
+        """_get_float_hwnd returns a window HWND that is not the main one."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._main_hwnd_cache = 11111
+        fi._find_process_windows = MagicMock(return_value=[11111, 22222])
+        assert fi._get_float_hwnd() == 22222
+
+    def test_get_float_hwnd_returns_zero_when_only_main(self):
+        """_get_float_hwnd returns 0 when only the main window exists."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        fi._main_hwnd_cache = 11111
+        fi._find_process_windows = MagicMock(return_value=[11111])
+        assert fi._get_float_hwnd() == 0
+
+    def test_get_float_hwnd_returns_zero_without_main_cache(self):
+        """_get_float_hwnd returns 0 when main HWND is not cached yet."""
+        fi = FloatingIndicator(main_window=MagicMock(), on_stop=lambda: None)
+        assert fi._get_float_hwnd() == 0
 
 
 class TestFloatingIndicatorMonitoring:

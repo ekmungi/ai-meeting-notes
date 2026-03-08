@@ -19,6 +19,25 @@ DEFAULT_TIMESTAMP_INTERVAL_S = 300  # 5 minutes
 # Valid timestamp modes
 TIMESTAMP_MODES = ("none", "local_time", "elapsed")
 
+# Characters illegal in Windows filenames
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*]')
+
+
+def sanitize_filename(name: str) -> str:
+    """Remove characters illegal in Windows filenames.
+
+    Args:
+        name: Raw string intended for use in a filename.
+
+    Returns:
+        Sanitized string with illegal characters replaced by hyphens,
+        collapsed to single hyphens and stripped of leading/trailing whitespace.
+    """
+    sanitized = _ILLEGAL_FILENAME_CHARS.sub("-", name)
+    # Collapse consecutive hyphens and strip
+    sanitized = re.sub(r"-{2,}", "-", sanitized).strip(" -")
+    return sanitized or "Meeting Notes"
+
 
 class MarkdownWriter:
     """Incrementally writes meeting transcript to a markdown file.
@@ -68,7 +87,8 @@ class MarkdownWriter:
     def start(self) -> Path:
         """Create the markdown file and write the header."""
         self._start_time = datetime.now()
-        filename = self._start_time.strftime("%Y%m%d_%H-%M") + f" - {self._meeting_type}.md"
+        safe_type = sanitize_filename(self._meeting_type)
+        filename = self._start_time.strftime("%Y%m%d_%H-%M") + f" - {safe_type}.md"
         self._file_path = self._output_dir / filename
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
