@@ -476,7 +476,7 @@ ai-meeting-notes/
           config_bridge.py           # Config synchronization
           floating_indicator.py      # Always-on-top recording indicator (win32)
           web/                       # HTML, CSS, JavaScript assets
-    tests/                           # 207 tests (pytest)
+    tests/                           # 212 tests (pytest)
   obsidian-plugin/
     manifest.json
     package.json                     # esbuild configuration
@@ -530,7 +530,7 @@ cd backend
 pytest -v
 ```
 
-207 tests cover configuration, engine behaviour, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, Pydantic models, silence detection, WAV recording, speaker diarization, settings storage, UI crypto, floating indicator, filename sanitization, and session deletion.
+212 tests cover configuration, engine behaviour, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, Pydantic models, silence detection, WAV recording, speaker diarization, settings storage, UI crypto, floating indicator, filename sanitization, and session deletion.
 
 ### Linting
 
