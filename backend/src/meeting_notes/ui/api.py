@@ -149,6 +149,21 @@ class MeetingNotesAPI:
             logger.exception("Failed to start recording")
             return {"error": str(exc)}
 
+    def pause_recording(self) -> dict:
+        """Pause or resume the active recording."""
+        if not self._runner or not self._runner.is_running:
+            return {"error": "No recording in progress."}
+        try:
+            if self._runner.is_paused:
+                self._runner.resume()
+                return {"paused": False}
+            else:
+                self._runner.pause()
+                return {"paused": True}
+        except Exception as exc:
+            logger.exception("Failed to pause/resume recording")
+            return {"error": str(exc)}
+
     def stop_recording(self) -> dict:
         if not self._runner or not self._runner.is_running:
             return {"error": "No recording in progress."}
@@ -213,31 +228,18 @@ def _parse_session_file(path: Path) -> dict | None:
         return None
 
     title = path.stem
-    engine = ""
     duration = ""
-    segments = "0"
 
-    # Parse YAML frontmatter
+    # Parse YAML frontmatter for duration
     fm_match = re.match(r"^---\n(.+?)\n---", content, re.DOTALL)
     if fm_match:
         fm = fm_match.group(1)
-        engine_match = re.search(r"engine:\s*(.+)", fm)
-        if engine_match:
-            engine = engine_match.group(1).strip()
-
-    # Parse footer
-    dur_match = re.search(r"\*Duration:\s*(.+?)\*", content)
-    if dur_match:
-        duration = dur_match.group(1).strip()
-
-    seg_match = re.search(r"\*Segments:\s*(\d+)\*", content)
-    if seg_match:
-        segments = seg_match.group(1)
+        dur_match = re.search(r'duration:\s*"?(.+?)"?\s*$', fm, re.MULTILINE)
+        if dur_match:
+            duration = dur_match.group(1).strip()
 
     return {
         "title": title,
-        "engine": engine,
         "duration": duration or "in progress",
-        "segments": segments,
         "path": str(path),
     }

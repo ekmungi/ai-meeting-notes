@@ -18,6 +18,12 @@ time: {time}
 
 ## Notes
 
+
+## Summary
+
+### Action Items
+-
+
 """
 
 _MERGE_SEPARATOR = "\n\n---\n\n"
@@ -93,7 +99,7 @@ def merge_notes_with_transcript(
     if transcript_marker in transcript_content:
         parts = transcript_content.split(transcript_marker, 1)
         notes_body = _extract_notes_body(notes_content)
-        merged = parts[0] + "## Notes\n\n" + notes_body + _MERGE_SEPARATOR + transcript_marker + parts[1]
+        merged = parts[0] + notes_body + _MERGE_SEPARATOR + transcript_marker + parts[1]
     else:
         notes_body = _extract_notes_body(notes_content)
         merged = notes_body + _MERGE_SEPARATOR + transcript_content

@@ -78,8 +78,6 @@ class MarkdownWriter:
         self._file.write("---\n")
         self._file.write(f"date: {self._start_time.strftime('%Y-%m-%d')}\n")
         self._file.write(f"start_time: \"{self._start_time.strftime('%H:%M:%S')}\"\n")
-        self._file.write(f"engine: {self._engine_name}\n")
-        self._file.write(f"timestamp_mode: {self._timestamp_mode}\n")
         self._file.write("tags: [meeting-notes]\n")
         self._file.write("---\n\n")
 
@@ -203,7 +201,7 @@ class MarkdownWriter:
         self._last_normalized = normalized
 
     def stop(self) -> None:
-        """Write final metadata and close the file."""
+        """Finalize: update frontmatter with end_time/duration, close file."""
         if self._file is None or self._file.closed:
             return
 
@@ -214,12 +212,19 @@ class MarkdownWriter:
         else:
             duration_str = "unknown"
 
-        self._file.write("\n---\n\n")
-        self._file.write(f"*Recording ended at {end_time.strftime('%H:%M:%S')}*\n")
-        self._file.write(f"*Duration: {duration_str}*\n")
-        self._file.write(f"*Segments: {self._segment_count}*\n")
         self._file.flush()
         self._file.close()
+
+        # Update frontmatter with end_time and duration
+        if self._file_path and self._file_path.exists():
+            content = self._file_path.read_text(encoding="utf-8")
+            content = content.replace(
+                "tags: [meeting-notes]\n---",
+                f"end_time: \"{end_time.strftime('%H:%M:%S')}\"\n"
+                f"duration: \"{duration_str}\"\n"
+                "tags: [meeting-notes]\n---",
+            )
+            self._file_path.write_text(content, encoding="utf-8")
 
         logger.info(
             "Markdown file closed: %s (%d segments, %s)",

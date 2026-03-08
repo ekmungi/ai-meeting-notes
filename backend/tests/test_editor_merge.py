@@ -34,7 +34,7 @@ class TestNotesMerge:
         content = result.read_text(encoding="utf-8")
         assert "Action item 1" in content
         assert "Hello world" in content
-        assert "## Notes" in content
+        assert "## Transcript" in content
 
     def test_merge_empty_notes_skips(self, tmp_path: Path):
         """Verify that empty notes (template only) skip merge."""

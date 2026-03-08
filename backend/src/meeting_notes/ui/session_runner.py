@@ -52,6 +52,23 @@ class SessionRunner:
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def is_paused(self) -> bool:
+        """Whether the session is currently paused."""
+        return self._session.is_paused if self._session else False
+
+    def pause(self) -> None:
+        """Pause audio capture. Session stays active but no audio is forwarded."""
+        if not self._running or not self._loop or not self._session:
+            return
+        asyncio.run_coroutine_threadsafe(self._session.pause(), self._loop)
+
+    def resume(self) -> None:
+        """Resume audio capture after a pause."""
+        if not self._running or not self._loop or not self._session:
+            return
+        asyncio.run_coroutine_threadsafe(self._session.resume(), self._loop)
+
     def start(self) -> str:
         """Start recording. Returns engine name. Called from pywebview thread pool.
 

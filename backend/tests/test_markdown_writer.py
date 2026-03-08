@@ -25,16 +25,18 @@ def test_writer_creates_file(tmp_output_dir: Path):
 
     content = path.read_text(encoding="utf-8")
     assert "---" in content
-    assert "engine: test" in content
-    assert "timestamp_mode: elapsed" in content
+    assert "start_time:" in content
     assert "tags: [meeting-notes]" in content
     assert "## Transcript" in content
+    # engine and timestamp_mode should NOT be in frontmatter
+    assert "engine:" not in content
+    assert "timestamp_mode:" not in content
 
     writer.stop()
 
 
 def test_writer_stop_writes_metadata(tmp_output_dir: Path):
-    """Writer should write duration and segment count on stop."""
+    """Writer should add end_time and duration to YAML frontmatter on stop."""
     writer = MarkdownWriter(output_dir=tmp_output_dir, engine_name="test")
     writer.start()
 
@@ -44,8 +46,12 @@ def test_writer_stop_writes_metadata(tmp_output_dir: Path):
     writer.stop()
 
     content = writer.file_path.read_text(encoding="utf-8")
-    assert "*Duration:" in content
-    assert "*Segments: 1*" in content
+    assert "end_time:" in content
+    assert "duration:" in content
+    # Footer text should NOT be present
+    assert "*Duration:" not in content
+    assert "*Segments:" not in content
+    assert "*Recording ended" not in content
 
 
 def test_writer_invalid_timestamp_mode():
@@ -113,7 +119,9 @@ def test_writer_skips_empty_text(tmp_output_dir: Path):
     writer.stop()
 
     content = writer.file_path.read_text(encoding="utf-8")
-    assert "*Segments: 0*" in content
+    # No segments written — transcript body should be empty (just header)
+    assert "## Transcript" in content
+    assert "end_time:" in content
 
 
 def test_writer_skips_duplicates(tmp_output_dir: Path):
@@ -147,7 +155,6 @@ def test_writer_replaces_reformatted_duplicate(tmp_output_dir: Path):
     content = writer.file_path.read_text(encoding="utf-8")
     assert "And so, my fellow Americans," in content
     assert "and so my fellow americans" not in content
-    assert "*Segments: 1*" in content
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +252,6 @@ def test_only_final_segments_should_be_written(tmp_output_dir: Path):
 
     content = writer.file_path.read_text(encoding="utf-8")
     assert content.count("Hey, this is a test.") == 1
-    assert "*Segments: 1*" in content
 
 
 # ---------------------------------------------------------------------------
@@ -421,4 +427,5 @@ def test_header_preserved_all_modes(tmp_output_dir: Path):
         assert "Negative." in content
         assert "Normal." in content
         assert "Five min." in content
-        assert f"*Segments: 4*" in content
+        assert "end_time:" in content
+        assert "duration:" in content

@@ -148,6 +148,16 @@ body {
   background: #C42F2F;
 }
 
+.action-row__btn--pause {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.action-row__btn--pause:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
 .action-row__btn--stop {
   background: var(--bg-surface);
   color: var(--text-primary);

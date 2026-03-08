@@ -7,7 +7,7 @@
  * merged inline and the separate file trashed.
  *
  * Output format matches the desktop MarkdownWriter (file-1.md format):
- *   - Transcript file:   YAML frontmatter + ## Transcription heading
+ *   - Transcript file:   YAML frontmatter + ## Transcript heading
  *   - Timestamp markers   **[HH:MM:SS]** every 5 minutes
  *   - Sentences grouped into paragraphs (new paragraph every 2 minutes)
  *   - Live partials in italic, replaced by final text when utterance ends
@@ -36,10 +36,10 @@ function formatFileTimestamp(date: Date): string {
 }
 
 /**
- * Build the transcript file header: YAML frontmatter + ## Transcription.
+ * Build the transcript file header: YAML frontmatter + ## Transcript.
  * Returns the complete header string (everything before the transcript body).
  */
-function buildTranscriptHeader(engine: string, timestampMode: string, startTime: Date): string {
+function buildTranscriptHeader(startTime: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   const date =
     `${startTime.getFullYear()}-` +
@@ -54,12 +54,10 @@ function buildTranscriptHeader(engine: string, timestampMode: string, startTime:
     "---",
     `date: ${date}`,
     `start_time: "${time}"`,
-    `engine: ${engine}`,
-    `timestamp_mode: ${timestampMode}`,
     "tags: [meeting-transcript]",
     "---",
     "",
-    "## Transcription",
+    "## Transcript",
     "",
   ].join("\n");
 }
@@ -131,7 +129,7 @@ export class TranscriptView {
 
     // Create transcript file
     const transcriptPath = normalizePath(`${folderPath}/${transcriptBaseName}.md`);
-    const transcriptHeader = buildTranscriptHeader(engine, this.settings.timestampMode, now);
+    const transcriptHeader = buildTranscriptHeader(now);
     this.transcriptFile = await this.app.vault.create(transcriptPath, transcriptHeader);
     this.headerLength = transcriptHeader.length;
 
@@ -253,24 +251,26 @@ export class TranscriptView {
     }
 
     const endTime = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
     const h = Math.floor(durationSeconds / 3600);
     const m = Math.floor((durationSeconds % 3600) / 60);
     const s = Math.floor(durationSeconds % 60);
-    const durationStr = `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    const endTimeStr = endTime.toTimeString().slice(0, 8);
-    const count = this.segmentCount;
-
-    const footer =
-      `\n---\n\n` +
-      `*Recording ended at ${endTimeStr}*\n` +
-      `*Duration: ${durationStr}*\n` +
-      `*Segments: ${count}*\n`;
+    const durationStr = `${h}:${pad(m)}:${pad(s)}`;
+    const endTimeStr = `${pad(endTime.getHours())}:${pad(endTime.getMinutes())}:${pad(endTime.getSeconds())}`;
 
     const headerLen = this.headerLength;
     const finalBody = this.completedContent;
 
     await this.app.vault.process(this.transcriptFile, (content) => {
-      return content.slice(0, headerLen) + finalBody + footer;
+      // Insert end_time and duration into YAML frontmatter
+      const updated = content.replace(
+        "tags: [meeting-transcript]\n---",
+        `end_time: "${endTimeStr}"\nduration: "${durationStr}"\ntags: [meeting-transcript]\n---`,
+      );
+      // Find the end of the header (after ## Transcript\n\n)
+      const headerEnd = updated.indexOf("## Transcript\n");
+      const bodyStart = headerEnd >= 0 ? updated.indexOf("\n", headerEnd) + 2 : headerLen;
+      return updated.slice(0, bodyStart) + finalBody;
     });
 
     // Optionally merge transcript into notes and trash the separate file

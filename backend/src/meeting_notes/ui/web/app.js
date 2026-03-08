@@ -8,6 +8,7 @@
 // -- DOM References (app-specific) --
 
 var elBtnStart = document.getElementById("btn-start");
+var elBtnPause = document.getElementById("btn-pause");
 var elBtnStop = document.getElementById("btn-stop");
 var elBtnMinimize = document.getElementById("btn-minimize");
 var elBtnClose = document.getElementById("btn-close");
@@ -23,9 +24,11 @@ var elBtnSkipMerge = document.getElementById("btn-skip-merge");
 // -- Recording State --
 
 var isRecording = false;
+var isPaused = false;
 var activeRowEl = null;
 var elapsedInterval = null;
 var recordingStartTime = null;
+var pausedElapsed = 0;
 
 // -- Initialization --
 
@@ -85,7 +88,6 @@ function renderSessionList(sessions) {
       '<div class="session-row__indicator"></div>' +
       '<div class="session-row__info">' +
         '<div class="session-row__title">' + escapeHtml(s.title) + '</div>' +
-        '<div class="session-row__meta">' + escapeHtml(s.engine) + ' | ' + escapeHtml(s.segments) + ' segments</div>' +
       '</div>' +
       '<div class="session-row__duration">' + escapeHtml(s.duration) + '</div>';
     row.addEventListener("dblclick", function () {
@@ -125,11 +127,36 @@ elBtnStart.addEventListener("click", async function () {
   }
 });
 
+elBtnPause.addEventListener("click", async function () {
+  if (!isRecording) return;
+  try {
+    var result = await pywebview.api.pause_recording();
+    if (result.error) {
+      showToast(result.error, "error");
+      return;
+    }
+    isPaused = result.paused;
+    elBtnPause.textContent = isPaused ? "Resume" : "Pause";
+    elStatusText.textContent = isPaused ? "Recording paused" : "Recording in progress";
+    if (isPaused) {
+      pausedElapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+      if (elapsedInterval) { clearInterval(elapsedInterval); elapsedInterval = null; }
+    } else {
+      recordingStartTime = Date.now() - (pausedElapsed * 1000);
+      elapsedInterval = setInterval(updateElapsedTimer, 1000);
+    }
+  } catch (err) {
+    showToast("Pause error: " + err, "error");
+  }
+});
+
 elBtnStop.addEventListener("click", async function () {
   if (!isRecording) return;
 
   isRecording = false;
+  isPaused = false;
   elBtnStop.disabled = true;
+  elBtnPause.disabled = true;
   elBtnStart.disabled = true;
   elStatusText.textContent = "Stopping... processing remaining audio";
 
@@ -156,8 +183,12 @@ elBtnStop.addEventListener("click", async function () {
  */
 function onRecordingStarted(engineName) {
   isRecording = true;
+  isPaused = false;
+  pausedElapsed = 0;
   elBtnStart.disabled = true;
   elBtnStart.textContent = "Recording...";
+  elBtnPause.disabled = false;
+  elBtnPause.textContent = "Pause";
   elBtnStop.disabled = false;
   elEngineSelect.disabled = true;
   elMeetingTypeSelect.disabled = true;
@@ -247,9 +278,12 @@ function onRecordingFileReady(filePath) {
  */
 function onRecordingStopped(outputPath) {
   isRecording = false;
+  isPaused = false;
   elConsentCheck.checked = false;
   elBtnStart.disabled = true;
   elBtnStart.textContent = "Start Recording";
+  elBtnPause.disabled = true;
+  elBtnPause.textContent = "Pause";
   elBtnStop.disabled = true;
   elEngineSelect.disabled = false;
   elMeetingTypeSelect.disabled = false;
