@@ -47,14 +47,20 @@ class TestBuildIndicatorHtml:
     def test_contains_stop_button(self):
         """HTML includes a stop button with expected class."""
         html = build_indicator_html()
-        assert "Stop" in html
-        assert "mn-float-stop" in html
+        assert "stop_recording" in html
+        assert "mn-btn-stop" in html
 
-    def test_contains_nav_button(self):
-        """HTML includes a transcript navigation button."""
+    def test_contains_back_button(self):
+        """HTML includes a back-to-app navigation button."""
         html = build_indicator_html()
-        assert "Transcript" in html
-        assert "mn-float-nav" in html
+        assert "go_to_main" in html
+        assert "mn-btn-back" in html
+
+    def test_contains_dismiss_button(self):
+        """HTML includes a dismiss button that hides without stopping."""
+        html = build_indicator_html()
+        assert "dismiss" in html
+        assert "mn-btn-close" in html
 
 
 class TestFloatingIndicatorLifecycle:

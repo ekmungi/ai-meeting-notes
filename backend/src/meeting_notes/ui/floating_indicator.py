@@ -16,9 +16,9 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-# Panel dimensions
-PANEL_WIDTH = 220
-PANEL_HEIGHT = 64
+# Panel dimensions (vertical layout: 3 stacked circle buttons)
+PANEL_WIDTH = 52
+PANEL_HEIGHT = 140
 EDGE_MARGIN = 20
 
 # Focus polling interval (seconds)
@@ -67,59 +67,45 @@ def build_indicator_html() -> str:
 <meta charset="utf-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: rgba(30, 30, 30, 0.95);
-    overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  html, body { background: transparent; overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    width: 52px; height: 140px; }
+  .mn-col {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px; background: #1e1e1e; border-radius: 26px;
+    padding: 8px 8px; width: 52px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.6);
   }
-  .mn-float-panel {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    height: 100%;
+  .mn-btn {
+    border: none; cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    border-radius: 50%; width: 36px; height: 36px;
+    transition: background 0.15s;
   }
-  .mn-float-stop {
-    flex: 0 0 80px;
-    height: 100%;
-    background: #dc2626;
-    border: none;
-    color: white;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  }
-  .mn-float-stop:hover { background: #b91c1c; }
-  .mn-float-stop svg { width: 16px; height: 16px; fill: white; }
-  .mn-float-nav {
-    flex: 1;
-    height: 100%;
-    background: transparent;
-    border: none;
-    color: #e5e5e5;
-    font-size: 13px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  }
-  .mn-float-nav:hover { background: rgba(255, 255, 255, 0.08); }
-  .mn-float-nav svg { width: 14px; height: 14px; }
+  .mn-btn svg { width: 18px; height: 18px; }
+  .mn-btn-stop { background: #dc2626; }
+  .mn-btn-stop:hover { background: #b91c1c; }
+  .mn-btn-stop svg { fill: white; }
+  .mn-btn-back { background: rgba(255,255,255,0.08); }
+  .mn-btn-back:hover { background: rgba(255,255,255,0.15); }
+  .mn-btn-back svg { stroke: #c0c0c0; fill: none; }
+  .mn-btn-back:hover svg { stroke: white; }
+  .mn-btn-close { background: transparent; }
+  .mn-btn-close:hover { background: rgba(255,255,255,0.08); }
+  .mn-btn-close svg { stroke: #606060; }
+  .mn-btn-close:hover svg { stroke: #a0a0a0; }
 </style>
 </head>
 <body>
-<div class="mn-float-panel">
-  <button class="mn-float-stop" onclick="pywebview.api.stop_recording()">
-    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-    Stop
+<div class="mn-col">
+  <button class="mn-btn mn-btn-stop" onclick="pywebview.api.stop_recording()" title="Stop recording">
+    <svg viewBox="0 0 18 18"><rect x="4" y="4" width="10" height="10" rx="2"/></svg>
   </button>
-  <button class="mn-float-nav" onclick="pywebview.api.go_to_main()">
-    Transcript
-    <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" fill="none" stroke-width="2"/></svg>
+  <button class="mn-btn mn-btn-back" onclick="pywebview.api.go_to_main()" title="Back to app">
+    <svg viewBox="0 0 18 18"><path d="M9 14V4M5 8l4-4 4 4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <button class="mn-btn mn-btn-close" onclick="pywebview.api.dismiss()" title="Dismiss">
+    <svg viewBox="0 0 18 18"><path d="M5 5l8 8M13 5l-8 8" stroke-width="1.8" stroke-linecap="round"/></svg>
   </button>
 </div>
 </body>
@@ -156,18 +142,26 @@ class _FloatAPI:
     """JS API bridge for the floating indicator window."""
 
     def __init__(
-        self, on_stop: Callable[[], None], on_navigate: Callable[[], None]
+        self,
+        on_stop: Callable[[], None],
+        on_navigate: Callable[[], None],
+        on_dismiss: Callable[[], None],
     ) -> None:
         self._on_stop = on_stop
         self._on_navigate = on_navigate
+        self._on_dismiss = on_dismiss
 
     def stop_recording(self) -> None:
         """Called from JS when stop button is clicked."""
         self._on_stop()
 
     def go_to_main(self) -> None:
-        """Called from JS when transcript button is clicked."""
+        """Called from JS when back button is clicked."""
         self._on_navigate()
+
+    def dismiss(self) -> None:
+        """Called from JS when close button is clicked. Hides without stopping."""
+        self._on_dismiss()
 
 
 class FloatingIndicator:
@@ -204,6 +198,7 @@ class FloatingIndicator:
             api = _FloatAPI(
                 on_stop=self._on_stop_and_hide,
                 on_navigate=self._navigate_and_hide,
+                on_dismiss=self._dismiss,
             )
 
             self._float_window = webview.create_window(
@@ -212,13 +207,14 @@ class FloatingIndicator:
                 js_api=api,
                 width=PANEL_WIDTH,
                 height=PANEL_HEIGHT,
+                min_size=(PANEL_WIDTH, PANEL_HEIGHT),
                 x=x,
                 y=y,
                 on_top=True,
                 frameless=True,
                 resizable=False,
-                minimizable=False,
                 hidden=True,
+                transparent=True,
             )
             logger.info("Floating indicator window created (hidden)")
         except Exception:
@@ -289,6 +285,10 @@ class FloatingIndicator:
                 pass
             self._float_window = None
 
+    def _dismiss(self) -> None:
+        """Hide the floating window. It will reappear next time focus is lost."""
+        self.hide()
+
     def _navigate_and_hide(self) -> None:
         """Bring main window to front and hide indicator."""
         self.hide()
@@ -321,7 +321,6 @@ class FloatingIndicator:
             logger.warning("Could not get main window HWND for focus polling")
             return
 
-        logger.info("Focus polling started, main HWND=%s", main_hwnd)
         was_focused = True
         while self._polling:
             time.sleep(_POLL_INTERVAL)

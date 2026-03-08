@@ -91,6 +91,17 @@ def main() -> None:
     if api._floating_indicator:
         api._floating_indicator.create_hidden_window()
 
+    # Force-hide the floating window after the main window loads,
+    # because hidden=True is not reliable on all pywebview backends.
+    def _ensure_float_hidden():
+        if api._floating_indicator and api._floating_indicator._float_window:
+            try:
+                api._floating_indicator._float_window.hide()
+            except Exception:
+                pass
+
+    window.events.loaded += _ensure_float_hidden
+
     # Register cleanup on window close
     def on_closing():
         logger.debug("Window closing — cleaning up")
