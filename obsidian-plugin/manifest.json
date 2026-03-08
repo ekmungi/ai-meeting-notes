@@ -1,7 +1,7 @@
 {
   "id": "ai-meeting-notes",
   "name": "AI Meeting Notes",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "minAppVersion": "1.0.0",
   "description": "Real-time meeting transcription powered by AI. Captures mic and system audio, transcribes via cloud (AssemblyAI) or local (Whisper) engine.",
   "author": "AI Meeting Notes",

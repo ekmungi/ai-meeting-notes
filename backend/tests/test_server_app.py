@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from meeting_notes import __version__
 from meeting_notes.server import app as app_module
 from meeting_notes.server.app import app
 from meeting_notes.server.server_runner import ServerRunner
@@ -42,7 +43,7 @@ class TestHealth:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == __version__
         assert data["recording"] is False
 
 

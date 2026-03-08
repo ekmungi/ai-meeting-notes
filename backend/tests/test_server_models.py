@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from meeting_notes import __version__
 from meeting_notes.server.models import (
     DeviceInfo,
     DevicesResponse,
@@ -20,7 +21,7 @@ class TestHealthResponse:
     def test_defaults(self):
         resp = HealthResponse()
         assert resp.status == "ok"
-        assert resp.version == "0.1.0"
+        assert resp.version == __version__
         assert resp.recording is False
 
     def test_recording_true(self):

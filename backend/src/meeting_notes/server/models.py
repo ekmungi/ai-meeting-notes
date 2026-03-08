@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from meeting_notes import __version__
+
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.1.0"
+    version: str = __version__
     recording: bool = False
 
 

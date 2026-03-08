@@ -46,9 +46,11 @@ async def lifespan(app: FastAPI):
     logger.info("Server shutting down")
 
 
+from meeting_notes import __version__
+
 app = FastAPI(
     title="AI Meeting Notes Server",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
