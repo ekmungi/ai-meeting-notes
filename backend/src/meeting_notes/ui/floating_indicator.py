@@ -17,9 +17,10 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 # Panel dimensions (vertical layout: 3 stacked circle buttons)
+# 3 buttons * 36px + 2 gaps * 6px + 2 padding * 8px = 136px
 PANEL_WIDTH = 52
-PANEL_HEIGHT = 140
-EDGE_MARGIN = 20
+PANEL_HEIGHT = 136
+EDGE_MARGIN = 8
 
 # Focus polling interval (seconds)
 _POLL_INTERVAL = 0.5
@@ -67,9 +68,9 @@ def build_indicator_html() -> str:
 <meta charset="utf-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { background: transparent; overflow: hidden;
+  html, body { background: transparent !important; overflow: hidden;
     -webkit-user-select: none; user-select: none;
-    width: 52px; height: 140px; }
+    width: 52px; height: 136px; }
   .mn-col {
     display: flex; flex-direction: column; align-items: center;
     gap: 6px; background: #1e1e1e; border-radius: 26px;
@@ -192,15 +193,14 @@ class FloatingIndicator:
         try:
             import webview  # type: ignore[import-untyped]
 
-            screen_w, screen_h = _get_screen_size()
-            x, y = calculate_position(self._position, screen_w, screen_h)
-
             api = _FloatAPI(
                 on_stop=self._on_stop_and_hide,
                 on_navigate=self._navigate_and_hide,
                 on_dismiss=self._dismiss,
             )
 
+            # Create off-screen (-9999) to prevent flash on startup.
+            # show() moves it to the correct position before making visible.
             self._float_window = webview.create_window(
                 title="Recording",
                 html=build_indicator_html(),
@@ -208,8 +208,8 @@ class FloatingIndicator:
                 width=PANEL_WIDTH,
                 height=PANEL_HEIGHT,
                 min_size=(PANEL_WIDTH, PANEL_HEIGHT),
-                x=x,
-                y=y,
+                x=-9999,
+                y=-9999,
                 on_top=True,
                 frameless=True,
                 resizable=False,
