@@ -131,7 +131,7 @@ elBtnStart.addEventListener("click", async function () {
     if (result.error) {
       showToast(result.error, "error");
       elBtnStart.disabled = false;
-      elStartIcon.className = "ph-fill ph-play";
+      elStartIcon.className = "ph-fill ph-record";
       elBtnStart.classList.remove("action-row__btn--loading");
       elStatusText.textContent = "Ready";
       return;
@@ -140,7 +140,7 @@ elBtnStart.addEventListener("click", async function () {
   } catch (err) {
     showToast("Failed to start recording: " + err, "error");
     elBtnStart.disabled = false;
-    elStartIcon.className = "ph-fill ph-play";
+    elStartIcon.className = "ph-fill ph-record";
     elBtnStart.classList.remove("action-row__btn--loading");
     elStatusText.textContent = "Ready";
   }
@@ -206,7 +206,7 @@ function onRecordingStarted(engineName) {
   isPaused = false;
   pausedElapsed = 0;
   elBtnStart.disabled = true;
-  elStartIcon.className = "ph-fill ph-play";
+  elStartIcon.className = "ph-fill ph-record";
   elBtnStart.classList.remove("action-row__btn--loading");
   elBtnPause.disabled = false;
   elPauseIcon.className = "ph-fill ph-pause";
@@ -307,7 +307,7 @@ function onRecordingStopped(outputPath) {
   isPaused = false;
   elConsentCheck.checked = false;
   elBtnStart.disabled = true;
-  elStartIcon.className = "ph-fill ph-play";
+  elStartIcon.className = "ph-fill ph-record";
   elBtnStart.classList.remove("action-row__btn--loading");
   elBtnPause.disabled = true;
   elPauseIcon.className = "ph-fill ph-pause";
