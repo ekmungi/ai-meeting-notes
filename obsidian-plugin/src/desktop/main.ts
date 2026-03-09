@@ -157,6 +157,7 @@ function resolveServerExe(): string {
   const bundled = path.join(
     process.resourcesPath,
     "server",
+    "ai-meeting-notes-server",
     "ai-meeting-notes-server.exe"
   );
   if (fs.existsSync(bundled)) return bundled;
@@ -279,12 +280,11 @@ function registerIpcHandlers(): void {
         const stamp = formatFileTimestamp(now);
         const safeName = sanitizeFilename(meetingType);
         const baseName = `${stamp} - ${safeName}`;
-        const transcriptBase = `${baseName}_transcript`;
         currentNotesPath = path.join(outputDir, `${baseName}.md`);
         currentTranscriptPath = result.output_path || "";
 
-        const yaml = buildNotesYaml(now, transcriptBase, meetingType);
-        const body = defaultNotesBody(`![[${transcriptBase}]]`);
+        const yaml = buildNotesYaml(now, "", meetingType);
+        const body = defaultNotesBody();
         fs.writeFileSync(currentNotesPath, yaml + body);
 
         /* Open in editor if configured */

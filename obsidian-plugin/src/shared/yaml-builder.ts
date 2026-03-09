@@ -36,7 +36,7 @@ export function buildNotesYaml(
     `type: "${meetingType}"`,
     `date: ${formatIsoDate(startTime)}`,
     `start_time: "${formatIsoTime(startTime)}"`,
-    `transcript_file: "[[${transcriptBaseName}]]"`,
+    ...(transcriptBaseName ? [`transcript_file: "[[${transcriptBaseName}]]"`] : []),
   ];
   if (customYaml) {
     for (const [k, v] of Object.entries(customYaml)) {
@@ -49,7 +49,7 @@ export function buildNotesYaml(
 }
 
 /** Default notes body used when no user template is set. */
-export function defaultNotesBody(embedLink: string): string {
+export function defaultNotesBody(embedLink = ""): string {
   return [
     "## Notes",
     "",
