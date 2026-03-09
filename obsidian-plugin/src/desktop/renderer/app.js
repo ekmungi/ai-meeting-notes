@@ -506,9 +506,18 @@ elBtnMerge.addEventListener("click", async function () {
   loadSessionHistory();
 });
 
-elBtnSkipMerge.addEventListener("click", function () {
+elBtnSkipMerge.addEventListener("click", async function () {
+  try {
+    var result = await window.api.discardTranscript();
+    if (result && result.error) {
+      showToast("Discard failed: " + result.error, "error");
+    } else {
+      showToast("Transcript discarded -- notes preserved", "info");
+    }
+  } catch (err) {
+    showToast("Discard error: " + err, "error");
+  }
   elMergeOverlay.classList.remove("modal-overlay--open");
-  showToast("Merge skipped -- notes file preserved", "info");
   loadSessionHistory();
 });
 
