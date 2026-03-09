@@ -3,7 +3,7 @@
  * Plugin stores its own API key and preferences (D024: independent client).
  */
 
-import { AbstractInputSuggest, App, PluginSettingTab, Setting, TextComponent, TFolder } from "obsidian";
+import { AbstractInputSuggest, App, PluginSettingTab, Setting, TextComponent, TFile, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
 import { isEncryptionAvailable } from "./crypto";
 
@@ -34,6 +34,36 @@ class FolderSuggest extends AbstractInputSuggest<TFolder> {
   selectSuggestion(folder: TFolder, _evt: MouseEvent | KeyboardEvent): void {
     this.setValue(folder.path);
     this.onSelectCallback(folder.path);
+    this.close();
+  }
+}
+
+/**
+ * Autocomplete suggest for vault markdown files.
+ * Filters .md files as the user types.
+ */
+class FileSuggest extends AbstractInputSuggest<TFile> {
+  private onSelectCallback: (path: string) => void;
+
+  constructor(app: App, inputEl: HTMLInputElement, onSelect: (path: string) => void) {
+    super(app, inputEl);
+    this.onSelectCallback = onSelect;
+  }
+
+  getSuggestions(query: string): TFile[] {
+    const lower = query.toLowerCase();
+    return this.app.vault.getMarkdownFiles()
+      .filter((f) => f.path.toLowerCase().includes(lower))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  renderSuggestion(file: TFile, el: HTMLElement): void {
+    el.setText(file.path);
+  }
+
+  selectSuggestion(file: TFile, _evt: MouseEvent | KeyboardEvent): void {
+    this.setValue(file.path);
+    this.onSelectCallback(file.path);
     this.close();
   }
 }
@@ -89,31 +119,37 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           });
       })
       .addButton((btn) => {
-        btn.setButtonText("Browse...").onClick(() => {
-          const input = document.createElement("input");
-          input.type = "file";
-          input.accept = ".exe";
-          input.addEventListener("change", async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            // Electron attaches the real filesystem path to File objects.
-            // The property is non-standard; use optional chaining and nullish
-            // coalescing so we get a string even on Electron builds where it
-            // is undefined.
-            const path = (file as unknown as { path?: string }).path ?? "";
-            if (!path) {
-              console.warn(
-                "AI Meeting Notes: Browse did not return a file path. " +
-                "This may happen if Obsidian's Electron version does not expose File.path. " +
-                "Please type the path manually."
-              );
-              return;
-            }
-            exePathText.setValue(path);
-            this.plugin.settings = { ...this.plugin.settings, serverExePath: path };
+        btn.setButtonText("Browse...").onClick(async () => {
+          // Use Electron's native dialog for reliable file path access.
+          // File.path is unavailable in newer Electron versions.
+          try {
+            const remote = (window as any).require("@electron/remote");
+            const result = await remote.dialog.showOpenDialog({
+              title: "Select server executable",
+              filters: [{ name: "Executables", extensions: ["exe"] }],
+              properties: ["openFile"],
+            });
+            if (result.canceled || !result.filePaths?.length) return;
+            const selectedPath = result.filePaths[0];
+            exePathText.setValue(selectedPath);
+            this.plugin.settings = { ...this.plugin.settings, serverExePath: selectedPath };
             await this.plugin.saveSettings();
-          }, { once: true });
-          input.click();
+          } catch {
+            // Fallback: HTML file input (File.path may work on some builds)
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = ".exe";
+            input.addEventListener("change", async () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              const filePath = (file as unknown as { path?: string }).path ?? "";
+              if (!filePath) return;
+              exePathText.setValue(filePath);
+              this.plugin.settings = { ...this.plugin.settings, serverExePath: filePath };
+              await this.plugin.saveSettings();
+            }, { once: true });
+            input.click();
+          }
         });
       });
 
@@ -233,8 +269,8 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Output" });
 
     new Setting(containerEl)
-      .setName("Output folder")
-      .setDesc("Vault folder for meeting notes (created if it doesn't exist). Type to search existing folders.")
+      .setName("Notes folder")
+      .setDesc("Vault folder for meeting notes. If transcript folder is empty, transcripts go here too.")
       .addText((text) => {
         text
           .setPlaceholder("Meetings")
@@ -245,6 +281,23 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           });
         new FolderSuggest(this.app, text.inputEl, async (path) => {
           this.plugin.settings = { ...this.plugin.settings, outputFolder: path };
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Transcript folder")
+      .setDesc("Separate folder for transcript files. Leave empty to use the notes folder.")
+      .addText((text) => {
+        text
+          .setPlaceholder("(same as notes folder)")
+          .setValue(this.plugin.settings.transcriptFolder)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, transcriptFolder: value };
+            await this.plugin.saveSettings();
+          });
+        new FolderSuggest(this.app, text.inputEl, async (path) => {
+          this.plugin.settings = { ...this.plugin.settings, transcriptFolder: path };
           await this.plugin.saveSettings();
         });
       });
@@ -357,6 +410,10 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             this.plugin.settings = { ...this.plugin.settings, meetingTemplatePath: value };
             await this.plugin.saveSettings();
           });
+        new FileSuggest(this.app, text.inputEl, async (path) => {
+          this.plugin.settings = { ...this.plugin.settings, meetingTemplatePath: path };
+          await this.plugin.saveSettings();
+        });
       });
 
     new Setting(containerEl)

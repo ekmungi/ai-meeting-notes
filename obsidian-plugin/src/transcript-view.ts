@@ -22,54 +22,12 @@
 
 import { type App, TFile, TFolder, normalizePath } from "obsidian";
 import type { MeetingNotesSettings, TranscriptMessage } from "./types";
+import { formatFileTimestamp, sanitizeFilename, formatIsoDate, formatIsoTime, formatDuration } from "./shared/format-utils";
+import { buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
+import { extractTranscriptBody, mergeTranscriptIntoNotes } from "./shared/merge-logic";
 
 const PARA_INTERVAL_S = 120; // New paragraph every 2 minutes
 const TS_INTERVAL_S = 300;   // Timestamp marker every 5 minutes
-
-/** Format a Date as YYYYMMDD_HH-MM for use in file names. */
-function formatFileTimestamp(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
-    `_${pad(date.getHours())}-${pad(date.getMinutes())}`
-  );
-}
-
-/** Remove characters illegal in Windows/Obsidian filenames. */
-function sanitizeFilename(name: string): string {
-  const sanitized = name
-    .replace(/[<>:"/\\|?*]/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^[- ]+|[- ]+$/g, "");
-  return sanitized || "Meeting Notes";
-}
-
-/**
- * Build the transcript file header: YAML frontmatter + ## Transcript.
- * Returns the complete header string (everything before the transcript body).
- */
-function buildTranscriptHeader(startTime: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const date =
-    `${startTime.getFullYear()}-` +
-    `${pad(startTime.getMonth() + 1)}-` +
-    `${pad(startTime.getDate())}`;
-  const time =
-    `${pad(startTime.getHours())}:` +
-    `${pad(startTime.getMinutes())}:` +
-    `${pad(startTime.getSeconds())}`;
-
-  return [
-    "---",
-    `date: ${date}`,
-    `start_time: "${time}"`,
-    "tags: [meeting-transcript]",
-    "---",
-    "",
-    "## Transcript",
-    "",
-  ].join("\n");
-}
 
 export class TranscriptView {
   private app: App;
@@ -122,14 +80,21 @@ export class TranscriptView {
     this.segmentCount = 0;
     this.lastSpeaker = null;
 
-    const folder = this.settings.outputFolder || "Meetings";
-    const folderPath = normalizePath(folder);
+    const notesFolder = this.settings.outputFolder || "Meetings";
+    // Transcript folder falls back to notes folder if empty
+    const transcriptFolder = this.settings.transcriptFolder || notesFolder;
 
-    const existing = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!existing) {
-      await this.app.vault.createFolder(folderPath);
-    } else if (!(existing instanceof TFolder)) {
-      throw new Error(`${folderPath} exists but is not a folder`);
+    const notesFolderPath = normalizePath(notesFolder);
+    const transcriptFolderPath = normalizePath(transcriptFolder);
+
+    // Ensure both folders exist
+    for (const fp of [notesFolderPath, transcriptFolderPath]) {
+      const existing = this.app.vault.getAbstractFileByPath(fp);
+      if (!existing) {
+        await this.app.vault.createFolder(fp);
+      } else if (!(existing instanceof TFolder)) {
+        throw new Error(`${fp} exists but is not a folder`);
+      }
     }
 
     const ts = formatFileTimestamp(now);
@@ -137,14 +102,14 @@ export class TranscriptView {
     const baseName = `${ts} ${safeType}`;
     const transcriptBaseName = `${baseName}_transcript`;
 
-    // Create transcript file
-    const transcriptPath = normalizePath(`${folderPath}/${transcriptBaseName}.md`);
-    const transcriptHeader = buildTranscriptHeader(now);
+    // Create transcript file (in transcript folder)
+    const transcriptPath = normalizePath(`${transcriptFolderPath}/${transcriptBaseName}.md`);
+    const transcriptHeader = buildTranscriptYaml(now, baseName);
     this.transcriptFile = await this.app.vault.create(transcriptPath, transcriptHeader);
     this.headerLength = transcriptHeader.length;
 
-    // Create notes file
-    const notesPath = normalizePath(`${folderPath}/${baseName}.md`);
+    // Create notes file (in notes folder)
+    const notesPath = normalizePath(`${notesFolderPath}/${baseName}.md`);
     const notesContent = await this._buildNotesContent(meetingType, now, transcriptBaseName);
     this.file = await this.app.vault.create(notesPath, notesContent);
 
@@ -159,65 +124,63 @@ export class TranscriptView {
   }
 
   /**
-   * Build the notes file content from a user template or built-in default.
-   * Replaces {{meeting_type}}, {{date}}, {{transcript_embed}} variables.
+   * Build the notes file content.
+   *
+   * Plugin always generates the YAML frontmatter (type, date, start_time,
+   * transcript_file, tags). If a user template is set, any YAML it contains
+   * is stripped and its custom fields are merged into the plugin's block.
+   * The template body (everything after YAML) provides the markdown sections.
+   * If no template is set, a built-in default body is used.
    */
   private async _buildNotesContent(
     typeName: string,
     startTime: Date,
     transcriptBaseName: string,
   ): Promise<string> {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const dateStr =
-      `${startTime.getFullYear()}-` +
-      `${pad(startTime.getMonth() + 1)}-` +
-      `${pad(startTime.getDate())}`;
+    const dateStr = formatIsoDate(startTime);
     const embedLink = `![[${transcriptBaseName}]]`;
 
-    // Try loading user template
+    // Extract body and custom YAML from user template (if any)
+    let templateBody = "";
+    let customYaml: Record<string, string> = {};
+
     const templatePath = this.settings.meetingTemplatePath;
     if (templatePath) {
       const normalizedPath = normalizePath(templatePath);
       const templateFile = this.app.vault.getAbstractFileByPath(normalizedPath);
       if (templateFile instanceof TFile) {
         const raw = await this.app.vault.read(templateFile);
-        let result = raw
+        const parsed = parseTemplateContent(raw, PLUGIN_YAML_KEYS);
+        customYaml = parsed.customFields;
+
+        // Variable substitution on template body
+        templateBody = parsed.body
           .replace(/\{\{meeting_type\}\}/g, typeName)
           .replace(/\{\{date\}\}/g, dateStr)
           .replace(/\{\{transcript_embed\}\}/g, embedLink);
-
-        // If template has a ## Transcript section but no embed, insert it
-        if (result.includes("## Transcript") && !result.includes(embedLink)) {
-          result = result.replace(
-            /## Transcript\s*\n/,
-            `## Transcript\n${embedLink}\n`,
-          );
-        }
-
-        return result;
       }
     }
 
-    // Built-in default template
-    return [
-      "---",
-      `type: "${typeName}"`,
-      `date: ${dateStr}`,
-      "tags: [meeting-notes]",
-      "---",
-      "",
-      "## Notes",
-      "",
-      "",
-      "## Summary",
-      "",
-      "### Action Items",
-      "- ",
-      "",
-      "## Transcript",
-      embedLink,
-      "",
-    ].join("\n");
+    // Use default body if no template or template file not found
+    if (!templateBody) {
+      templateBody = defaultNotesBody(embedLink);
+    } else {
+      // Ensure transcript embed is present somewhere in the body
+      if (!templateBody.includes(embedLink)) {
+        if (templateBody.includes("## Transcript")) {
+          templateBody = templateBody.replace(
+            /## Transcript\s*\n/,
+            `## Transcript\n${embedLink}\n`,
+          );
+        } else {
+          templateBody += `\n## Transcript\n${embedLink}\n`;
+        }
+      }
+    }
+
+    // Assemble: plugin YAML + custom fields + body
+    const yaml = buildNotesYaml(startTime, transcriptBaseName, typeName, customYaml);
+    return yaml + "\n" + templateBody;
   }
 
   /** Add audio file reference to the notes file frontmatter. */
@@ -261,12 +224,8 @@ export class TranscriptView {
     }
 
     const endTime = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const h = Math.floor(durationSeconds / 3600);
-    const m = Math.floor((durationSeconds % 3600) / 60);
-    const s = Math.floor(durationSeconds % 60);
-    const durationStr = `${h}:${pad(m)}:${pad(s)}`;
-    const endTimeStr = `${pad(endTime.getHours())}:${pad(endTime.getMinutes())}:${pad(endTime.getSeconds())}`;
+    const durationStr = formatDuration(durationSeconds);
+    const endTimeStr = formatIsoTime(endTime);
 
     const headerLen = this.headerLength;
     const finalBody = this.completedContent;
@@ -282,6 +241,16 @@ export class TranscriptView {
       const bodyStart = headerEnd >= 0 ? updated.indexOf("\n", headerEnd) + 2 : headerLen;
       return updated.slice(0, bodyStart) + finalBody;
     });
+
+    // Add end_time and duration to notes file frontmatter too
+    if (this.file) {
+      await this.app.vault.process(this.file, (content) => {
+        return content.replace(
+          "tags: [meeting-notes]\n---",
+          `end_time: "${endTimeStr}"\nduration: "${durationStr}"\ntags: [meeting-notes]\n---`,
+        );
+      });
+    }
 
     // Optionally merge transcript into notes and trash the separate file
     if (this.settings.mergeTranscriptOnStop) {
@@ -308,15 +277,17 @@ export class TranscriptView {
   async renameForType(meetingType: string): Promise<void> {
     if (!this.file || !this.transcriptFile || !this.startTime) return;
 
-    const folder = this.settings.outputFolder || "Meetings";
-    const folderPath = normalizePath(folder);
+    const notesFolder = this.settings.outputFolder || "Meetings";
+    const transcriptFolder = this.settings.transcriptFolder || notesFolder;
+    const notesFolderPath = normalizePath(notesFolder);
+    const transcriptFolderPath = normalizePath(transcriptFolder);
     const ts = formatFileTimestamp(this.startTime);
 
     const safeType = sanitizeFilename(meetingType);
     const newBaseName = `${ts} ${safeType}`;
     const newTranscriptBaseName = `${newBaseName}_transcript`;
-    const newTranscriptPath = normalizePath(`${folderPath}/${newTranscriptBaseName}.md`);
-    const newNotesPath = normalizePath(`${folderPath}/${newBaseName}.md`);
+    const newTranscriptPath = normalizePath(`${transcriptFolderPath}/${newTranscriptBaseName}.md`);
+    const newNotesPath = normalizePath(`${notesFolderPath}/${newBaseName}.md`);
 
     // Capture old transcript base name for embed replacement
     const oldTranscriptBaseName = this.transcriptFile.basename;
@@ -324,10 +295,19 @@ export class TranscriptView {
     // Rename transcript file first
     await this.app.fileManager.renameFile(this.transcriptFile, newTranscriptPath);
 
-    // Update embed link and frontmatter type in notes file
+    // Update transcript backlink to new notes file
+    await this.app.vault.process(this.transcriptFile, (content) => {
+      return content.replace(
+        /^notes_file:\s*".*"$/m,
+        `notes_file: "[[${newBaseName}]]"`,
+      );
+    });
+
+    // Update embed link, transcript_file, and frontmatter type in notes file
     await this.app.vault.process(this.file, (content) => {
       return content
         .replace(`![[${oldTranscriptBaseName}]]`, `![[${newTranscriptBaseName}]]`)
+        .replace(/^transcript_file:\s*".*"$/m, `transcript_file: "[[${newTranscriptBaseName}]]"`)
         .replace(/^type:\s*".*"$/m, `type: "${meetingType}"`);
     });
 
@@ -342,12 +322,12 @@ export class TranscriptView {
   private async _mergeTranscript(): Promise<void> {
     if (!this.file || !this.transcriptFile) return;
 
-    const transcriptContent = await this.app.vault.read(this.transcriptFile);
+    const rawTranscript = await this.app.vault.read(this.transcriptFile);
     const transcriptBaseName = this.transcriptFile.basename;
-    const embedLink = `![[${transcriptBaseName}]]`;
+    const transcriptBody = extractTranscriptBody(rawTranscript);
 
     await this.app.vault.process(this.file, (content) => {
-      return content.replace(embedLink, transcriptContent);
+      return mergeTranscriptIntoNotes(content, transcriptBody, transcriptBaseName);
     });
 
     await this.app.vault.trash(this.transcriptFile, false);

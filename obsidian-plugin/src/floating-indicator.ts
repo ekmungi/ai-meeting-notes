@@ -19,10 +19,10 @@ interface IndicatorCallbacks {
 
 /** Margin from screen edges in pixels. */
 const EDGE_MARGIN = 20;
-/** Panel width in pixels. */
-const PANEL_WIDTH = 220;
-/** Panel height in pixels. */
-const PANEL_HEIGHT = 64;
+/** Electron popout minimum is ~200x200; we request small but fill whatever we get. */
+const PANEL_WIDTH = 72;
+/** Request compact height; actual may be larger due to Electron minimums. */
+const PANEL_HEIGHT = 160;
 
 /**
  * Manages a floating always-on-top panel that shows recording controls
@@ -143,6 +143,7 @@ export class FloatingIndicator {
 
       electronWindow.setAlwaysOnTop(true, "floating");
       electronWindow.setSkipTaskbar(true);
+      electronWindow.setMinimumSize(PANEL_WIDTH, PANEL_HEIGHT);
       electronWindow.setResizable(false);
       electronWindow.setMinimizable(false);
       electronWindow.setMaximizable(false);
@@ -207,73 +208,74 @@ export class FloatingIndicator {
     const doc: Document = popoutWindow?.document ?? containerEl.ownerDocument;
     if (!doc) return;
 
-    // Hide all Obsidian chrome in the popout
+    // Hide all Obsidian chrome and fill window with our panel
     const style = doc.createElement("style");
     style.textContent = `
-      body {
+      html, body {
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
-        background: transparent !important;
+        width: 100% !important;
+        height: 100% !important;
+        background: var(--background-secondary, #1e1e1e) !important;
       }
-      .app-container, .workspace, .workspace-split, .workspace-leaf {
-        background: transparent !important;
+      .app-container, .workspace, .workspace-split,
+      .workspace-leaf, .workspace-leaf-content {
+        width: 100% !important;
+        height: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: var(--background-secondary, #1e1e1e) !important;
       }
       .titlebar, .workspace-tab-header-container, .status-bar,
       .workspace-ribbon, .sidebar-toggle-button,
       .workspace-tab-header, .view-header {
         display: none !important;
       }
-      .workspace-leaf-content {
-        padding: 0 !important;
-        background: transparent !important;
-      }
       .mn-float-panel {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        width: ${PANEL_WIDTH}px;
-        height: ${PANEL_HEIGHT}px;
-        background: rgba(30, 30, 30, 0.95);
-        border-radius: 10px;
-        overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        height: 100%;
+        background: var(--background-secondary, #1e1e1e);
+        font-family: var(--font-interface, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+        border: 1px solid var(--background-modifier-border, rgba(255,255,255,0.08));
       }
+      .mn-float-btn {
+        width: 40px;
+        height: 40px;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-m, 8px);
+        transition: background 0.15s;
+      }
+      .mn-float-btn svg { width: 20px; height: 20px; }
       .mn-float-stop {
-        flex: 0 0 80px;
-        height: 100%;
-        background: #dc2626;
-        border: none;
-        color: white;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        transition: background 0.15s;
+        background: #dc2626 !important;
       }
-      .mn-float-stop:hover { background: #b91c1c; }
-      .mn-float-stop svg { width: 16px; height: 16px; fill: white; }
+      .mn-float-stop:hover {
+        background: #b91c1c !important;
+      }
+      .mn-float-stop svg { fill: white; }
       .mn-float-nav {
-        flex: 1;
-        height: 100%;
-        background: transparent;
-        border: none;
-        color: #e5e5e5;
-        font-size: 13px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        transition: background 0.15s;
-        padding: 0 12px;
+        background: var(--background-modifier-hover, rgba(255,255,255,0.08));
       }
-      .mn-float-nav:hover { background: rgba(255, 255, 255, 0.08); }
-      .mn-float-nav svg { width: 14px; height: 14px; fill: currentColor; }
+      .mn-float-nav:hover {
+        background: var(--background-modifier-active-hover, rgba(255,255,255,0.15));
+      }
+      .mn-float-nav svg {
+        stroke: var(--text-muted, #c0c0c0);
+        fill: none;
+      }
+      .mn-float-nav:hover svg {
+        stroke: var(--text-normal, white);
+      }
     `;
     doc.head.appendChild(style);
 
@@ -284,18 +286,20 @@ export class FloatingIndicator {
     panel.className = "mn-float-panel";
 
     const stopBtn = doc.createElement("button");
-    stopBtn.className = "mn-float-stop";
+    stopBtn.className = "mn-float-btn mn-float-stop";
+    stopBtn.title = "Stop recording";
     stopBtn.innerHTML =
-      '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Stop';
+      '<svg viewBox="0 0 18 18"><rect x="4" y="4" width="10" height="10" rx="2"/></svg>';
     stopBtn.addEventListener("click", () => {
       this.callbacks.onStop();
       this.deactivate();
     });
 
     const navBtn = doc.createElement("button");
-    navBtn.className = "mn-float-nav";
+    navBtn.className = "mn-float-btn mn-float-nav";
+    navBtn.title = "Back to Obsidian";
     navBtn.innerHTML =
-      'Transcript <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" fill="none" stroke-width="2"/></svg>';
+      '<svg viewBox="0 0 18 18"><path d="M6 9L3 12l3 3M3 12h7a4 4 0 0 0 0-8H7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     navBtn.addEventListener("click", () => {
       this.callbacks.onNavigate();
       this.hide();
