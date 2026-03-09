@@ -303,7 +303,7 @@ function registerIpcHandlers(): void {
         isPaused = false;
         isRecording = true;
         if (floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
-        return { engine_name: result.engine || engine };
+        return { engine_name: result.engine || engine, notes_path: currentNotesPath };
       } catch (err) {
         return { error: `Failed to start: ${err}` };
       }

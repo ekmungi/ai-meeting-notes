@@ -33,6 +33,7 @@ var elapsedInterval = null;
 var recordingStartTime = null;
 var pausedElapsed = 0;
 var segmentCount = 0;
+var currentNotesPath = "";
 
 // -- Initialization --
 
@@ -164,6 +165,7 @@ elBtnStart.addEventListener("click", async function () {
     var engine = elEngineSelect.value;
     var meetingType = elMeetingTypeSelect.value;
     var result = await window.api.startRecording(engine, meetingType);
+    currentNotesPath = result.notes_path || "";
     if (result.error) {
       showToast(result.error, "error");
       elBtnStart.disabled = false;
@@ -357,8 +359,8 @@ function onRecordingStopped(outputPath) {
   // Reload session history to get accurate data
   loadSessionHistory();
 
-  if (outputPath) {
-    showToast("Transcript saved", "success");
+  if (outputPath && currentNotesPath) {
+    onMergePrompt(currentNotesPath);
   }
 }
 
