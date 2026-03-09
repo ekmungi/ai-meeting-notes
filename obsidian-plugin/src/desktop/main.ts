@@ -58,6 +58,7 @@ let floatWindow: BrowserWindow | null = null;
 let serverLauncher: ServerLauncherBase | null = null;
 let wsClient: WsClient | null = null;
 let isPaused = false;
+let isRecording = false;
 let currentNotesPath = "";
 let currentTranscriptPath = "";
 
@@ -184,7 +185,7 @@ function createMainWindow(): void {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
   mainWindow.on("blur", () => {
-    if (floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
+    if (isRecording && floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
   });
   mainWindow.on("focus", () => {
     if (floatWindow && !floatWindow.isDestroyed()) floatWindow.hide();
@@ -300,6 +301,7 @@ function registerIpcHandlers(): void {
         wsClient.connect();
 
         isPaused = false;
+        isRecording = true;
         if (floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
         return { engine_name: result.engine || engine };
       } catch (err) {
@@ -319,6 +321,7 @@ function registerIpcHandlers(): void {
       wsClient?.disconnect();
       wsClient = null;
       isPaused = false;
+      isRecording = false;
       if (floatWindow && !floatWindow.isDestroyed()) floatWindow.hide();
 
       currentTranscriptPath = result.output_path || currentTranscriptPath;
