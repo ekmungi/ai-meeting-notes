@@ -71,11 +71,6 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging",
     )
     parser.add_argument(
-        "--gui",
-        action="store_true",
-        help="Launch the desktop GUI (requires pywebview)",
-    )
-    parser.add_argument(
         "--server",
         action="store_true",
         help="Start the FastAPI server for Obsidian plugin (127.0.0.1:9876)",
@@ -200,12 +195,6 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-
-    if args.gui:
-        from meeting_notes.ui.app import main as gui_main
-
-        gui_main()
-        return
 
     if args.server:
         from meeting_notes.server.app import run_server

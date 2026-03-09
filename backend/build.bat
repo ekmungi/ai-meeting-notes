@@ -1,18 +1,16 @@
 @echo off
 REM Build AI Meeting Notes portable bundle
-REM Usage: build.bat [gui|server|plugin|all]  (default: gui)
-REM Requires: pip install pyinstaller
+REM Usage: build.bat [server|plugin|desktop|all]  (default: desktop)
+REM Requires: pip install pyinstaller (for server/plugin targets)
 REM Output:   ..\releases\
 
 cd /d "%~dp0"
 
 set TARGET=%1
-if "%TARGET%"=="" set TARGET=gui
+if "%TARGET%"=="" set TARGET=desktop
 set RELEASES=%~dp0..\releases
 
 if /i "%TARGET%"=="all" (
-    call "%~f0" gui
-    if %ERRORLEVEL% NEQ 0 exit /b 1
     call "%~f0" server
     if %ERRORLEVEL% NEQ 0 exit /b 1
     call "%~f0" plugin
@@ -21,18 +19,7 @@ if /i "%TARGET%"=="all" (
     exit /b %ERRORLEVEL%
 )
 
-if /i "%TARGET%"=="gui" (
-    echo Building AI Meeting Notes GUI...
-    pyinstaller meeting_notes_gui.spec --noconfirm --clean --distpath "%RELEASES%"
-    if %ERRORLEVEL% EQU 0 (
-        echo.
-        echo Build successful!
-        echo Output: %RELEASES%\AI Meeting Notes\AI Meeting Notes.exe
-    ) else (
-        echo Build failed. Check errors above.
-        exit /b 1
-    )
-) else if /i "%TARGET%"=="server" (
+if /i "%TARGET%"=="server" (
     echo Building AI Meeting Notes Server...
     pyinstaller meeting_notes_server.spec --noconfirm --clean --distpath "%RELEASES%"
     if %ERRORLEVEL% EQU 0 (
@@ -82,6 +69,6 @@ if /i "%TARGET%"=="gui" (
     )
 ) else (
     echo Unknown target: %TARGET%
-    echo Usage: build.bat [gui^|server^|plugin^|desktop^|all]
+    echo Usage: build.bat [server^|plugin^|desktop^|all]
     exit /b 1
 )

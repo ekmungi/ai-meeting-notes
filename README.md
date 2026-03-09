@@ -7,11 +7,10 @@ Two transcription engines are available:
 - **Cloud** (AssemblyAI Universal Streaming v3) — high accuracy, speaker labels, requires internet and API key
 - **Local** (faster-whisper) — fully offline, six model sizes from `tiny.en` to `medium.en`
 
-Three distribution modes are available:
+Two distribution modes are available:
 
 - **Electron desktop app** — dark-themed standalone app with session history and settings (shares code with the plugin)
 - **Obsidian plugin** — live transcript streaming into vault notes via a local FastAPI server
-- **Legacy desktop app** — pywebview GUI (deprecated; use Electron desktop instead)
 
 ## Legal Disclaimer
 
@@ -119,7 +118,6 @@ pip install -e .
 
 | Feature | Extra | Command |
 |---|---|---|
-| Desktop GUI | `gui` | `pip install -e ".[gui]"` |
 | Cloud transcription | (core) | Included in base install |
 | Local transcription | `local` | `pip install -e ".[local]"` |
 | Obsidian plugin server | `server` | `pip install -e ".[server]"` |
@@ -128,7 +126,7 @@ pip install -e .
 To install all extras at once:
 
 ```bash
-pip install -e ".[gui,local,server,dev]"
+pip install -e ".[local,server,dev]"
 ```
 
 ### 4. Configure environment variables (CLI only)
@@ -161,15 +159,6 @@ npm run dev:desktop
 
 Click the record button. Select a meeting type when prompted. The transcript streams into the preview panel. Click stop to save the markdown file and optionally open it in your editor.
 
-### Legacy desktop app (pywebview)
-
-```bash
-cd backend
-python -m meeting_notes --gui
-```
-
-Same functionality as the Electron app but requires Python and pywebview.
-
 ### Command line
 
 ```bash
@@ -201,7 +190,6 @@ usage: meeting_notes [-h] [--gui] [--server] [--server-host HOST] [--server-port
                      [--verbose]
 
 Options:
-  --gui                 Launch legacy desktop UI (pywebview; use Electron app instead)
   --server              Start FastAPI server for Obsidian plugin (127.0.0.1:9876)
   --server-host         Server bind address (default: 127.0.0.1)
   --server-port         Server port (default: 9876)
@@ -401,14 +389,14 @@ Models are downloaded from Hugging Face on first use.
 ## Architecture
 
 ```
-[Electron Desktop App]   [Obsidian Plugin]   [CLI]   [Legacy pywebview]
-         |                      |              |              |
-         +---- shared/ ---------+              |              |
-         |  (types, ws-client, format-utils,   |              |
-         |   yaml-builder, merge-logic,        |              |
-         |   server-launcher)                  |              |
-         |                                     |              |
-         +----------+----------+---------------+--------------+
+[Electron Desktop App]   [Obsidian Plugin]   [CLI]
+         |                      |              |
+         +---- shared/ ---------+              |
+         |  (types, ws-client, format-utils,   |
+         |   yaml-builder, merge-logic,        |
+         |   server-launcher)                  |
+         |                                     |
+         +----------+----------+---------------+
                     |
            [FastAPI Server (127.0.0.1:9876)]
              REST: /health, /devices, /session/*
@@ -487,15 +475,7 @@ ai-meeting-notes/
           models.py                  # Pydantic request and response models
           ws.py                      # WebSocket connection manager
           server_runner.py           # Async session adapter
-        ui/                          # Desktop application
-          app.py                     # pywebview window
-          api.py                     # JavaScript API bridge
-          session_runner.py          # Session lifecycle management
-          settings_store.py          # Settings persistence (DPAPI encrypted keys)
-          config_bridge.py           # Config synchronization
-          floating_indicator.py      # Always-on-top recording indicator (win32)
-          web/                       # HTML, CSS, JavaScript assets
-    tests/                           # 212 tests (pytest)
+    tests/                           # pytest test suite
   obsidian-plugin/
     manifest.json
     package.json                     # esbuild + Electron build configuration
@@ -617,12 +597,6 @@ The `small.en` model with `int8` quantization runs at roughly 4-5x real-time on 
 - Check that Windows Defender is not blocking the Electron process
 - Run `npm run dev:desktop` from the obsidian-plugin directory
 
-**Legacy pywebview UI does not open**
-
-- Verify WebView2 is installed (pre-installed on Windows 11; download for Windows 10)
-- Check that Windows Defender is not blocking pywebview
-- Run with `--verbose` for detailed error output
-
 **Ctrl+C does not stop recording immediately**
 
 On Windows, the signal handler may take a moment to propagate through the asyncio event loop. Press Ctrl+C a second time if the first does not respond.
@@ -634,7 +608,6 @@ On Windows, the signal handler may take a moment to propagate through the asynci
 | Status | Feature |
 |---|---|
 | Done | Electron desktop app (code-sharing with plugin via shared/ modules) |
-| Done | Legacy desktop UI (pywebview, deprecated) |
 | Done | Obsidian plugin with auto-launch server executable |
 | Done | Pause and resume recording |
 | Done | Encrypted API key storage (DPAPI) |

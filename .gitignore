@@ -44,6 +44,7 @@ htmlcov/
 # Node (Obsidian plugin)
 node_modules/
 obsidian-plugin/main.js
+obsidian-plugin/dist-desktop/
 
 # Logs
 *.log
