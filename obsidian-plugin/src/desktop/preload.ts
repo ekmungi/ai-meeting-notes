@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("api", {
   getSessionHistory: () => ipcRenderer.invoke("get-session-history"),
   deleteSession: (filePath: string) => ipcRenderer.invoke("delete-session", filePath),
   mergeNotes: () => ipcRenderer.invoke("merge-notes"),
+  discardTranscript: () => ipcRenderer.invoke("discard-transcript"),
 
   /* File operations */
   browseDirectory: () => ipcRenderer.invoke("browse-directory"),

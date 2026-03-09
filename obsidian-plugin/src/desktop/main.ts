@@ -382,6 +382,22 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle("discard-transcript", () => {
+    try {
+      if (currentTranscriptPath && fs.existsSync(currentTranscriptPath)) {
+        fs.unlinkSync(currentTranscriptPath);
+      }
+      if (currentNotesPath && fs.existsSync(currentNotesPath)) {
+        let notes = fs.readFileSync(currentNotesPath, "utf-8");
+        notes = notes.replace(/^transcript_file:\s*".*"\n/m, "");
+        fs.writeFileSync(currentNotesPath, notes);
+      }
+      return { ok: true };
+    } catch (err) {
+      return { error: `Discard failed: ${err}` };
+    }
+  });
+
   /* File operations */
   ipcMain.handle("browse-directory", async () => {
     if (!mainWindow) return null;
