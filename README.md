@@ -7,10 +7,11 @@ Two transcription engines are available:
 - **Cloud** (AssemblyAI Universal Streaming v3) — high accuracy, speaker labels, requires internet and API key
 - **Local** (faster-whisper) — fully offline, six model sizes from `tiny.en` to `medium.en`
 
-Two distribution modes are available:
+Three distribution modes are available:
 
-- **Desktop application** — dark-themed pywebview GUI with session history and settings
+- **Electron desktop app** — dark-themed standalone app with session history and settings (shares code with the plugin)
 - **Obsidian plugin** — live transcript streaming into vault notes via a local FastAPI server
+- **Legacy desktop app** — pywebview GUI (deprecated; use Electron desktop instead)
 
 ## Legal Disclaimer
 
@@ -36,13 +37,14 @@ Before recording any meeting, ensure you have informed all participants and obta
 - Silence detection with rolling RMS monitor, status bar indicator, configurable auto-stop (toast at 100 s, stop at 120 s)
 - Encrypted API key storage (DPAPI on Windows desktop, `electron.safeStorage` in Obsidian plugin)
 
-### Desktop Application
+### Electron Desktop App
 
-- Dark-themed pywebview window with session list and live transcript preview
-- Icon-only action buttons (play, pause, stop, settings) with Phosphor Icons
+- Dark-themed Electron window with session list and live transcript preview
+- Shares code with the Obsidian plugin via a common `shared/` module layer
+- Icon-only action buttons (record, pause, stop, settings) with Phosphor Icons
 - Meeting type quick-selector (Meeting Notes, One to One, Standup, and custom types)
 - Session list with document icons and hover actions (open in editor, delete to recycle bin)
-- Delete with undo: 5-second toast with slide-out animation, send2trash for safe deletion
+- Delete with undo: 5-second toast with slide-out animation, recycle bin deletion
 - Keyboard shortcuts: Space (pause/resume), Esc (close modal), Ctrl+S (settings), Enter (start)
 - Loading spinners on async operations (start, stop, settings save)
 - Floating recording indicator: always-on-top mini panel when app loses focus
@@ -52,6 +54,7 @@ Before recording any meeting, ensure you have informed all participants and obta
 - Engine selector with privacy indicator (Cloud / Local / Auto)
 - Smooth animations: backdrop blur on modals, status flash on recording start
 - Settings persisted to `%APPDATA%\ai-meeting-notes\settings.json`
+- Bundles backend server exe as an extra resource (single portable exe)
 
 ### Obsidian Plugin
 
@@ -72,7 +75,7 @@ Before recording any meeting, ensure you have informed all participants and obta
 
 | Requirement | Notes |
 |---|---|
-| Windows 10 or 11 | WASAPI loopback requires Windows; WebView2 included on Windows 11, [downloadable](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) for Windows 10 |
+| Windows 10 or 11 | WASAPI loopback requires Windows |
 | Python 3.12+ | Required for backend |
 | Active audio output device | WASAPI loopback requires speakers or headphones to be active |
 | AssemblyAI API key | Required for cloud engine only; streaming rate is $0.0025/min |
@@ -148,14 +151,24 @@ See [Configuration Reference](#configuration-reference) for all available variab
 
 ## Quick Start
 
-### Desktop application
+### Electron desktop app
+
+```bash
+cd obsidian-plugin
+npm install
+npm run dev:desktop
+```
+
+Click the record button. Select a meeting type when prompted. The transcript streams into the preview panel. Click stop to save the markdown file and optionally open it in your editor.
+
+### Legacy desktop app (pywebview)
 
 ```bash
 cd backend
 python -m meeting_notes --gui
 ```
 
-Click the record button. Select a meeting type when prompted. The transcript streams into the preview panel. Click stop to save the markdown file and optionally open it in your editor.
+Same functionality as the Electron app but requires Python and pywebview.
 
 ### Command line
 
@@ -188,7 +201,7 @@ usage: meeting_notes [-h] [--gui] [--server] [--server-host HOST] [--server-port
                      [--verbose]
 
 Options:
-  --gui                 Launch desktop UI (pywebview)
+  --gui                 Launch legacy desktop UI (pywebview; use Electron app instead)
   --server              Start FastAPI server for Obsidian plugin (127.0.0.1:9876)
   --server-host         Server bind address (default: 127.0.0.1)
   --server-port         Server port (default: 9876)
@@ -388,13 +401,19 @@ Models are downloaded from Hugging Face on first use.
 ## Architecture
 
 ```
-[Desktop UI (pywebview)]   [CLI]   [Obsidian Plugin (TypeScript)]
-         |                   |               |
-         |                   |   [FastAPI Server (127.0.0.1:9876)]
-         |                   |     REST: /health, /devices, /session/*
-         |                   |     WebSocket: /ws (transcript stream)
-         |                   |               |
-         +---------+---------+---------------+
+[Electron Desktop App]   [Obsidian Plugin]   [CLI]   [Legacy pywebview]
+         |                      |              |              |
+         +---- shared/ ---------+              |              |
+         |  (types, ws-client, format-utils,   |              |
+         |   yaml-builder, merge-logic,        |              |
+         |   server-launcher)                  |              |
+         |                                     |              |
+         +----------+----------+---------------+--------------+
+                    |
+           [FastAPI Server (127.0.0.1:9876)]
+             REST: /health, /devices, /session/*
+             WebSocket: /ws (transcript stream)
+                    |
                    |
            [MeetingSession]  -- orchestrates all components
                +-- AudioCapture (PyAudioWPatch)
@@ -479,18 +498,37 @@ ai-meeting-notes/
     tests/                           # 212 tests (pytest)
   obsidian-plugin/
     manifest.json
-    package.json                     # esbuild configuration
+    package.json                     # esbuild + Electron build configuration
+    electron-builder.json            # Electron packaging config
+    tsconfig.desktop.json            # TypeScript config for desktop build
     styles.css
     src/
       main.ts                        # Plugin entry point, 4-state machine
       settings.ts                    # Settings tab
-      server-launcher.ts             # Server process lifecycle
+      server-launcher.ts             # Obsidian server launcher (extends shared)
       transcript-view.ts             # Note creation and live transcript
-      ws-client.ts                   # WebSocket with heartbeat and reconnect
-      types.ts                       # TypeScript interfaces
-      crypto.ts                      # API key encryption (electron.safeStorage)
+      ws-client.ts                   # Re-export from shared/
+      types.ts                       # Re-export from shared/
+      crypto.ts                      # Re-export from shared/
       meeting-type-modal.ts          # Meeting type quick-selector modal
       floating-indicator.ts          # Always-on-top recording indicator
+      shared/                        # Pure TypeScript, no platform deps
+        types.ts                     # Interfaces, defaults, server URL
+        ws-client.ts                 # WebSocket with heartbeat and reconnect
+        crypto.ts                    # API key encryption (electron.safeStorage)
+        server-launcher.ts           # Pluggable server process launcher
+        format-utils.ts              # Filename formatting and sanitization
+        yaml-builder.ts              # YAML frontmatter generation
+        merge-logic.ts               # Transcript merge into notes
+      desktop/                       # Electron desktop app
+        main.ts                      # Electron main process, IPC, windows
+        preload.ts                   # contextBridge IPC bridge
+        renderer/                    # HTML, CSS, JS for Electron renderer
+          index.html                 # Main app window
+          float.html                 # Floating recording indicator
+          app.js                     # Recording, sessions, callbacks
+          settings.js                # Settings modal, meeting types
+          styles.css                 # Dark theme stylesheet
 ```
 
 ---
@@ -514,6 +552,10 @@ build.bat server
 # Plugin installer
 build.bat plugin
 # Output: releases/ai-meeting-notes-plugin-installer.exe
+
+# Electron desktop app (portable exe)
+build.bat desktop
+# Output: releases/AI Meeting Notes Desktop/
 
 # All targets
 build.bat all
@@ -568,7 +610,14 @@ The `small.en` model with `int8` quantization runs at roughly 4-5x real-time on 
 - Try `distil-large-v3` for best quality-to-speed ratio
 - Close other CPU-intensive processes
 
-**Desktop UI does not open**
+**Electron desktop app does not open**
+
+- Ensure Node.js 18+ is installed
+- Run `cd obsidian-plugin && npm install` to install Electron
+- Check that Windows Defender is not blocking the Electron process
+- Run `npm run dev:desktop` from the obsidian-plugin directory
+
+**Legacy pywebview UI does not open**
 
 - Verify WebView2 is installed (pre-installed on Windows 11; download for Windows 10)
 - Check that Windows Defender is not blocking pywebview
@@ -584,7 +633,8 @@ On Windows, the signal handler may take a moment to propagate through the asynci
 
 | Status | Feature |
 |---|---|
-| Done | Desktop UI (dark-themed pywebview with icon buttons and animations) |
+| Done | Electron desktop app (code-sharing with plugin via shared/ modules) |
+| Done | Legacy desktop UI (pywebview, deprecated) |
 | Done | Obsidian plugin with auto-launch server executable |
 | Done | Pause and resume recording |
 | Done | Encrypted API key storage (DPAPI) |

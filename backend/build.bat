@@ -16,6 +16,8 @@ if /i "%TARGET%"=="all" (
     call "%~f0" server
     if %ERRORLEVEL% NEQ 0 exit /b 1
     call "%~f0" plugin
+    if %ERRORLEVEL% NEQ 0 exit /b 1
+    call "%~f0" desktop
     exit /b %ERRORLEVEL%
 )
 
@@ -59,8 +61,27 @@ if /i "%TARGET%"=="gui" (
         echo Build failed. Check errors above.
         exit /b 1
     )
+) else if /i "%TARGET%"=="desktop" (
+    echo Building Electron Desktop App...
+    cd /d "%~dp0..\obsidian-plugin"
+    call npx tsc -p tsconfig.desktop.json
+    if %ERRORLEVEL% NEQ 0 (
+        echo TypeScript compilation failed.
+        exit /b 1
+    )
+    REM Copy renderer assets to dist
+    xcopy /s /y /q src\desktop\renderer\* dist-desktop\desktop\renderer\ >nul
+    call npx electron-builder --win --config electron-builder.json
+    if %ERRORLEVEL% EQU 0 (
+        echo.
+        echo Build successful!
+        echo Output: %RELEASES%\AI Meeting Notes Desktop\
+    ) else (
+        echo Build failed. Check errors above.
+        exit /b 1
+    )
 ) else (
     echo Unknown target: %TARGET%
-    echo Usage: build.bat [gui^|server^|plugin^|all]
+    echo Usage: build.bat [gui^|server^|plugin^|desktop^|all]
     exit /b 1
 )
