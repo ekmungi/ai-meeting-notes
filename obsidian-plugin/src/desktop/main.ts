@@ -192,6 +192,7 @@ function createMainWindow(): void {
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
+    if (floatWindow && !floatWindow.isDestroyed()) floatWindow.close();
   });
 }
 
