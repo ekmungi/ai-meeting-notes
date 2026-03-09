@@ -8,7 +8,7 @@ import { WsClient } from "../shared/ws-client";
 import { serverBaseUrl } from "../shared/types";
 import {
   extractTranscriptBody,
-  mergeTranscriptIntoNotes,
+  mergeTranscriptIntoSection,
 } from "../shared/merge-logic";
 import {
   formatFileTimestamp,
@@ -373,12 +373,7 @@ function registerIpcHandlers(): void {
       const notesContent = fs.readFileSync(currentNotesPath, "utf-8");
       const rawTranscript = fs.readFileSync(currentTranscriptPath, "utf-8");
       const transcriptBody = extractTranscriptBody(rawTranscript);
-      const transcriptBase = path.basename(currentTranscriptPath, ".md");
-      const merged = mergeTranscriptIntoNotes(
-        notesContent,
-        transcriptBody,
-        transcriptBase
-      );
+      const merged = mergeTranscriptIntoSection(notesContent, transcriptBody);
       fs.writeFileSync(currentNotesPath, merged);
       fs.unlinkSync(currentTranscriptPath);
       return { ok: true };

@@ -37,3 +37,25 @@ export function mergeTranscriptIntoNotes(
   result = result.replace(/^transcript_file:\s*".*"\n/m, "");
   return result;
 }
+
+/**
+ * Merge transcript body into notes by replacing content after ## Transcript heading.
+ * Used by the desktop app where notes have a plain ## Transcript section (no embed).
+ * Also removes transcript_file from notes YAML frontmatter if present.
+ */
+export function mergeTranscriptIntoSection(
+  notesContent: string,
+  transcriptBody: string,
+): string {
+  const marker = "## Transcript";
+  const idx = notesContent.indexOf(marker);
+  if (idx < 0) {
+    // Fallback: append section at end if not found
+    return notesContent.trimEnd() + "\n\n" + marker + "\n\n" + transcriptBody.trimEnd() + "\n";
+  }
+  const before = notesContent.slice(0, idx + marker.length);
+  let result = before + "\n\n" + transcriptBody.trimEnd() + "\n";
+  // Remove transcript_file from YAML frontmatter if present
+  result = result.replace(/^transcript_file:\s*".*"\n/m, "");
+  return result;
+}
