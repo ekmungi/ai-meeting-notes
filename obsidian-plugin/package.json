@@ -3,11 +3,17 @@
   "version": "0.6.0",
   "private": true,
   "description": "Obsidian plugin for AI Meeting Notes",
+  "main": "dist-desktop/desktop/main.js",
   "scripts": {
     "build": "esbuild src/main.ts --bundle --outfile=main.js --external:obsidian --format=cjs --platform=node --target=es2020",
-    "dev": "esbuild src/main.ts --bundle --outfile=main.js --external:obsidian --format=cjs --platform=node --target=es2020 --watch"
+    "dev": "esbuild src/main.ts --bundle --outfile=main.js --external:obsidian --format=cjs --platform=node --target=es2020 --watch",
+    "build:desktop": "npx tsc -p tsconfig.desktop.json",
+    "dev:desktop": "npx tsc -p tsconfig.desktop.json && npx electron dist-desktop/desktop/main.js",
+    "dist:desktop": "npx tsc -p tsconfig.desktop.json && npx electron-builder --win --config electron-builder.json"
   },
   "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.21.0",
     "obsidian": "latest"
   }

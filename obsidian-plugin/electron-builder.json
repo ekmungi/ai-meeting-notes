@@ -1,0 +1,21 @@
+{
+  "appId": "com.ai-meeting-notes.desktop",
+  "productName": "AI Meeting Notes",
+  "directories": {
+    "output": "../releases/AI Meeting Notes Desktop"
+  },
+  "files": [
+    "dist-desktop/**/*",
+    "src/desktop/renderer/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "../releases/ai-meeting-notes-server/ai-meeting-notes-server.exe",
+      "to": "server/ai-meeting-notes-server.exe"
+    }
+  ],
+  "win": {
+    "target": "portable",
+    "icon": "src/desktop/renderer/icon.png"
+  }
+}
