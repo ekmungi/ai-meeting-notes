@@ -27,13 +27,13 @@ Before recording any meeting, ensure you have informed all participants and obta
 ### Core
 
 - Dual audio capture: microphone and system audio (WASAPI loopback) mixed in real time
-- Cloud transcription via AssemblyAI Universal Streaming v3 with streaming speaker diarization
+- Cloud transcription via AssemblyAI Universal Streaming v3 with turn-based speaker labels
 - Local offline transcription via faster-whisper (6 model sizes, CPU inference)
 - Automatic engine selection: cloud when online and an API key is configured, local otherwise
 - Markdown output with YAML frontmatter, 2-minute paragraph grouping, 3 timestamp modes
 - Configurable endpointing sensitivity (aggressive / balanced / conservative / very_conservative)
 - WAV recording written in parallel alongside every transcript (~1.9 MB/min)
-- Silence detection with rolling RMS monitor, status bar indicator, configurable auto-stop (toast at 100 s, stop at 120 s)
+- Silence detection with rolling RMS monitor, transcript-aware reset, status bar indicator, configurable auto-stop (toast at 100 s, stop at 120 s)
 - Encrypted API key storage (DPAPI on Windows desktop, `electron.safeStorage` in Obsidian plugin)
 
 ### Electron Desktop App
@@ -46,14 +46,14 @@ Before recording any meeting, ensure you have informed all participants and obta
 - Delete with undo: 5-second toast with slide-out animation, recycle bin deletion
 - Keyboard shortcuts: Space (pause/resume), Esc (close modal), Ctrl+S (settings), Enter (start)
 - Loading spinners on async operations (start, stop, settings save)
-- Floating recording indicator: always-on-top mini panel when app loses focus
+- Floating recording indicator: draggable always-on-top mini panel with edge snapping when app loses focus
 - Settings panel: API key, output directory, timestamp mode, endpointing, local model size
 - Editor launch on recording start; merge dialog on recording stop
 - Recording consent checkbox for GDPR and compliance workflows
 - Engine selector with privacy indicator (Cloud / Local / Auto)
 - Smooth animations: backdrop blur on modals, status flash on recording start
 - Settings persisted to `%APPDATA%\ai-meeting-notes\settings.json`
-- Bundles backend server exe as an extra resource (single portable exe)
+- NSIS installer bundles backend server and Obsidian plugin (offers plugin install during setup)
 
 ### Obsidian Plugin
 
@@ -62,8 +62,8 @@ Before recording any meeting, ensure you have informed all participants and obta
 - Two-file system: notes file and raw transcript file, with optional merge on stop
 - Meeting type modal with custom type support
 - Speaker labels rendered inline (cloud diarization)
-- Silence detection with Obsidian notice warnings
-- Floating recording indicator: always-on-top panel when Obsidian loses focus
+- Silence detection with Obsidian notice warnings, Extend/Dismiss/Stop actions
+- Floating recording indicator: hover flyout on ribbon icon during recording
 - Filename sanitization for Windows-safe meeting type names
 - Server port and executable path configurable in plugin settings
 - GUI installer with vault auto-detection (single exe)
@@ -149,7 +149,21 @@ See [Configuration Reference](#configuration-reference) for all available variab
 
 ## Quick Start
 
-### Electron desktop app
+### Electron desktop app (NSIS installer)
+
+Run the installer — no Python or Node.js required:
+
+```
+releases\AI Meeting Notes Desktop\AI Meeting Notes Setup 0.8.0.exe
+```
+
+The installer offers to install the Obsidian plugin into a vault during setup. The app bundles the backend server and launches it automatically. Configure your AssemblyAI API key in Settings (gear icon), or switch to Local engine for offline use.
+
+To build the installer from source, see [Building Portable Executables](#building-portable-executables).
+
+### Electron desktop app (from source)
+
+Requires Node.js 18+ and the backend server exe (or a running server).
 
 ```bash
 cd obsidian-plugin
@@ -182,7 +196,7 @@ Press **Ctrl+C** to stop recording. The transcript is saved automatically.
 ### CLI Options
 
 ```
-usage: meeting_notes [-h] [--gui] [--server] [--server-host HOST] [--server-port PORT]
+usage: meeting_notes [-h] [--server] [--server-host HOST] [--server-port PORT]
                      [--list-devices] [--engine {cloud,local,auto}]
                      [--output OUTPUT] [--mic MIC] [--system SYSTEM]
                      [--endpointing {aggressive,balanced,conservative,very_conservative}]
@@ -382,7 +396,7 @@ Models are downloaded from Hugging Face on first use.
 | Internet required | Yes | No |
 | Cost | $0.0025/min | Free |
 | Data privacy | Sent to AssemblyAI (SOC 2, TLS, AES-256) | On-device only |
-| Speaker diarization | Yes (streaming labels) | No |
+| Speaker diarization | Yes (turn-based labels) | No |
 
 ---
 
@@ -390,20 +404,23 @@ Models are downloaded from Hugging Face on first use.
 
 ```
 [Electron Desktop App]   [Obsidian Plugin]   [CLI]
-         |                      |              |
-         +---- shared/ ---------+              |
-         |  (types, ws-client, format-utils,   |
-         |   yaml-builder, merge-logic,        |
-         |   server-launcher)                  |
-         |                                     |
-         +----------+----------+---------------+
-                    |
-           [FastAPI Server (127.0.0.1:9876)]
-             REST: /health, /devices, /session/*
-             WebSocket: /ws (transcript stream)
-                    |
-                   |
-           [MeetingSession]  -- orchestrates all components
+  renderer (browser)        (browser)          |
+    |  WebSocket              |  WebSocket     |
+    |  IPC to main            |                |
+    |  (file I/O)             |                |
+    +---- shared/ ------------+                |
+    |  (types, ws-client, format-utils,        |
+    |   yaml-builder, merge-logic,             |
+    |   server-launcher)                       |
+    |                                          |
+    +----------+----------+--------------------+
+               |
+      [FastAPI Server (127.0.0.1:9876)]
+        REST: /health, /devices, /session/*
+        WebSocket: /ws (transcript stream)
+               |
+              |
+      [MeetingSession]  -- orchestrates all components
                +-- AudioCapture (PyAudioWPatch)
                |     +-- Microphone stream (16 kHz mono PCM)
                |     +-- System audio loopback (WASAPI)
@@ -422,6 +439,8 @@ Models are downloaded from Hugging Face on first use.
                |
                +-- SilenceMonitor
                |     +-- Rolling RMS energy detection
+               |     +-- Transcript-aware reset (speech proof overrides RMS)
+               |     +-- Client-triggered reset via WebSocket (Extend button)
                |     +-- Configurable threshold and auto-stop timer
                |
                +-- WavWriter
@@ -450,10 +469,10 @@ ai-meeting-notes/
   .env.example                       # Environment variable template
   backend/
     pyproject.toml                   # Package metadata and dependencies
-    build.bat                        # PyInstaller build script (gui / server targets)
+    build.bat                        # Build script (server / plugin / desktop targets)
     src/
       meeting_notes/
-        __main__.py                  # Entry point (--gui, --server, --engine, ...)
+        __main__.py                  # Entry point (--server, --engine, ...)
         config.py                    # Configuration from env vars and CLI flags
         connectivity.py              # Internet connectivity check
         session.py                   # Session orchestrator
@@ -521,24 +540,22 @@ Create standalone Windows executables that do not require a Python installation:
 cd backend
 pip install pyinstaller
 
-# Desktop GUI application
-build.bat gui
-# Output: releases/AI Meeting Notes/AI Meeting Notes.exe
-
 # Server only (headless, for use with the Obsidian plugin)
 build.bat server
 # Output: releases/ai-meeting-notes-server/ai-meeting-notes-server.exe
 
 # Plugin installer
 build.bat plugin
-# Output: releases/ai-meeting-notes-plugin-installer.exe
+# Output: releases/AI Meeting Notes Plugin Installer.exe
 
-# Electron desktop app (portable exe)
+# Electron desktop app (NSIS installer)
 build.bat desktop
-# Output: releases/AI Meeting Notes Desktop/
+# Output: releases/AI Meeting Notes Desktop/AI Meeting Notes Setup 0.8.0.exe
 
-# All targets
-build.bat all
+# Full installer (server + plugin + desktop), skips unchanged targets
+build.bat installer
+# Use --force to rebuild everything
+build.bat installer --force
 ```
 
 ---
@@ -552,7 +569,7 @@ cd backend
 pytest -v
 ```
 
-212 tests cover configuration, engine behaviour, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, Pydantic models, silence detection, WAV recording, speaker diarization, settings storage, UI crypto, floating indicator, filename sanitization, and session deletion.
+143 tests cover configuration, engine behaviour, fragment merging, local transcription, markdown output, session orchestration, server endpoints, WebSocket broadcast, Pydantic models, silence detection (including reset_silence), WAV recording, speaker diarization, and filename sanitization.
 
 ### Linting
 
@@ -592,10 +609,16 @@ The `small.en` model with `int8` quantization runs at roughly 4-5x real-time on 
 
 **Electron desktop app does not open**
 
-- Ensure Node.js 18+ is installed
-- Run `cd obsidian-plugin && npm install` to install Electron
-- Check that Windows Defender is not blocking the Electron process
-- Run `npm run dev:desktop` from the obsidian-plugin directory
+- **Portable exe:** Windows SmartScreen may block unsigned executables. Click "More info" then "Run anyway" on the SmartScreen prompt.
+- **From source:** Ensure Node.js 18+ is installed, run `cd obsidian-plugin && npm install`, then `npm run dev:desktop`.
+- Check that Windows Defender or antivirus is not blocking the Electron process.
+- The app auto-launches the backend server. If the server exe is missing, build it first with `build.bat server`.
+
+**No transcript appears in the desktop app**
+
+- Check the AssemblyAI API key in Settings (gear icon). An invalid key produces no error in the UI but the server log shows `Invalid API key`.
+- Try switching to Local engine (no API key needed).
+- Ensure audio devices are active (microphone plugged in, speakers or headphones connected).
 
 **Ctrl+C does not stop recording immediately**
 
@@ -615,7 +638,7 @@ On Windows, the signal handler may take a moment to propagate through the asynci
 | Done | Meeting type selector and smart note naming |
 | Done | Separate notes and transcript files |
 | Done | WAV recording fallback |
-| Done | Cloud speaker diarization with streaming labels |
+| Done | Cloud speaker diarization with turn-based labels |
 | Done | Floating recording indicator (desktop and plugin) |
 | Done | Keyboard shortcuts (Space, Esc, Ctrl+S, Enter) |
 | Done | Session management (open, delete with undo) |

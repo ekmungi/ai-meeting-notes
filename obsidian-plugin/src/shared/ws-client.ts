@@ -40,6 +40,13 @@ export class WsClient {
     this._cleanup();
   }
 
+  /** Send a JSON message to the server. */
+  send(message: Record<string, unknown>): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
   private _connect(): void {
     this._cleanup();
 

@@ -165,6 +165,63 @@ class TestSilenceMonitor:
         assert not mon.is_silent
         callback.assert_not_called()
 
+    def test_reset_silence_preserves_calibration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """reset_silence() clears silence state but keeps calibration intact."""
+        mon = SilenceMonitor(threshold_seconds=5.0)
+        _calibrate(mon)
+
+        fake_time = 0.0
+
+        def _fake_monotonic() -> float:
+            return fake_time
+
+        monkeypatch.setattr("meeting_notes.audio.silence.time.monotonic", _fake_monotonic)
+
+        # Accumulate silence past threshold.
+        mon.feed_chunk(_make_silent_chunk())
+        fake_time = 6.0
+        mon.feed_chunk(_make_silent_chunk())
+        assert mon.is_silent
+        assert mon.silent_seconds >= 5.0
+
+        # reset_silence clears silence but keeps calibration.
+        mon.reset_silence()
+        assert mon.calibrated  # Still calibrated
+        assert not mon.is_silent
+        assert mon.silent_seconds == 0.0
+
+    def test_reset_silence_prevents_immediate_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After reset_silence(), silence must re-accumulate before callback fires again."""
+        callback = MagicMock()
+        mon = SilenceMonitor(threshold_seconds=5.0, interval_seconds=15.0, on_silence=callback)
+        _calibrate(mon)
+
+        fake_time = 0.0
+
+        def _fake_monotonic() -> float:
+            return fake_time
+
+        monkeypatch.setattr("meeting_notes.audio.silence.time.monotonic", _fake_monotonic)
+
+        # Accumulate silence, trigger callback.
+        mon.feed_chunk(_make_silent_chunk())
+        fake_time = 6.0
+        mon.feed_chunk(_make_silent_chunk())
+        assert callback.call_count == 1
+
+        # Reset silence (simulates "Extend" button).
+        mon.reset_silence()
+
+        # Next silent chunk starts a new silence window; not yet at threshold.
+        fake_time = 7.0
+        mon.feed_chunk(_make_silent_chunk())
+        assert callback.call_count == 1  # No new callback yet
+
+        # Must accumulate another 5s before triggering again.
+        fake_time = 13.0
+        mon.feed_chunk(_make_silent_chunk())
+        assert callback.call_count == 2
+
     def test_reset_clears_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """reset() returns monitor to pre-calibration state."""
         mon = SilenceMonitor(threshold_seconds=5.0)

@@ -1,12 +1,13 @@
 /**
- * Floating recording indicator -- appears as an always-on-top mini panel
- * when Obsidian loses focus during an active recording (D050).
+ * Floating recording indicator -- appears as an always-on-top mini window
+ * when Obsidian loses focus during an active recording.
  *
- * Uses Obsidian's openPopoutLeaf() to create a separate OS window,
- * then accesses the underlying Electron BrowserWindow for alwaysOnTop.
+ * Creates a raw Electron BrowserWindow via @electron/remote for exact
+ * size control (no Obsidian workspace chrome or minimum size constraints).
+ * Button clicks communicate back via document.title changes.
  */
 
-import type { App, WorkspaceLeaf } from "obsidian";
+import type { App } from "obsidian";
 
 /** Position options for the floating indicator. */
 export type IndicatorPosition = "top-right" | "center-right" | "bottom-left";
@@ -18,21 +19,68 @@ interface IndicatorCallbacks {
 }
 
 /** Margin from screen edges in pixels. */
-const EDGE_MARGIN = 20;
-/** Electron popout minimum is ~200x200; we request small but fill whatever we get. */
-const PANEL_WIDTH = 72;
-/** Request compact height; actual may be larger due to Electron minimums. */
-const PANEL_HEIGHT = 160;
+const EDGE_MARGIN = 4;
+/** Window width — just enough for a single column of buttons. */
+const WIN_WIDTH = 58;
+/** Window height — two 50px buttons + gap + padding. */
+const WIN_HEIGHT = 116;
+
+/** Inline HTML loaded into the raw BrowserWindow (no node/electron deps). */
+function buildFloatHtml(): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>float</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden;
+    width: 100%; height: 100%;
+    background: #1e1e1e;
+    -webkit-app-region: drag;
+  }
+  .panel {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px; width: 100%; height: 100%;
+    box-sizing: border-box; padding: 4px;
+  }
+  .btn {
+    width: 50px; height: 50px;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    -webkit-app-region: no-drag;
+    transition: background 0.12s;
+  }
+  .btn svg { width: 28px; height: 28px; }
+  .stop { background: #dc2626; }
+  .stop:hover { background: #b91c1c; }
+  .stop svg { fill: white; }
+  .nav { background: rgba(255,255,255,0.08); }
+  .nav:hover { background: rgba(255,255,255,0.15); }
+  .nav svg { stroke: #c0c0c0; fill: none; }
+  .nav:hover svg { stroke: white; }
+</style>
+</head><body>
+<div class="panel">
+  <button class="btn stop" id="stop" title="Stop recording">
+    <svg viewBox="2 2 14 14"><rect x="4" y="4" width="10" height="10" rx="2"/></svg>
+  </button>
+  <button class="btn nav" id="nav" title="Back to Obsidian">
+    <svg viewBox="1 2 15 14"><path d="M6 9L3 12l3 3M3 12h7a4 4 0 0 0 0-8H7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+</div>
+</body></html>`;
+}
 
 /**
- * Manages a floating always-on-top panel that shows recording controls
- * when Obsidian loses focus. Uses openPopoutLeaf + Electron BrowserWindow.
+ * Manages a floating always-on-top mini window that shows recording
+ * controls when Obsidian loses focus. Uses a raw Electron BrowserWindow
+ * for pixel-perfect sizing (no Obsidian popout chrome).
  */
 export class FloatingIndicator {
   private app: App;
   private callbacks: IndicatorCallbacks;
-  private position: IndicatorPosition = "top-right";
-  private popoutLeaf: WorkspaceLeaf | null = null;
+  private position: IndicatorPosition = "center-right";
+  private floatWin: any = null;
   private boundOnBlur: (() => void) | null = null;
   private boundOnFocus: (() => void) | null = null;
   private isVisible = false;
@@ -62,14 +110,14 @@ export class FloatingIndicator {
   show(): void {
     if (this.isVisible || !this.isActive) return;
     this.isVisible = true;
-    this._createPopout();
+    this._createWindow();
   }
 
   /** Hide the floating indicator window. */
   hide(): void {
     if (!this.isVisible) return;
     this.isVisible = false;
-    this._destroyPopout();
+    this._destroyWindow();
   }
 
   /** Clean up all resources. Call on plugin unload. */
@@ -79,11 +127,6 @@ export class FloatingIndicator {
 
   // --- Private: Focus Listeners ---
 
-  /** Register blur/focus listeners on the DOM window.
-   *
-   * Uses standard DOM events instead of Electron remote API, which
-   * was removed in Electron 22+ and is unavailable in modern Obsidian.
-   */
   private _registerFocusListeners(): void {
     this.boundOnBlur = () => {
       if (this.isActive) this.show();
@@ -91,12 +134,10 @@ export class FloatingIndicator {
     this.boundOnFocus = () => {
       this.hide();
     };
-
     window.addEventListener("blur", this.boundOnBlur);
     window.addEventListener("focus", this.boundOnFocus);
   }
 
-  /** Remove blur/focus listeners from the DOM window. */
   private _removeFocusListeners(): void {
     if (this.boundOnBlur) window.removeEventListener("blur", this.boundOnBlur);
     if (this.boundOnFocus) window.removeEventListener("focus", this.boundOnFocus);
@@ -104,74 +145,122 @@ export class FloatingIndicator {
     this.boundOnFocus = null;
   }
 
-  // --- Private: Popout Window ---
+  // --- Private: Raw Electron BrowserWindow ---
 
-  /** Create the popout leaf window via Obsidian API. */
-  private _createPopout(): void {
-    if (this.popoutLeaf) return;
-
+  /** Try to get @electron/remote module. */
+  private _getRemote(): any {
     try {
-      this.popoutLeaf = (this.app.workspace as any).openPopoutLeaf();
-      if (!this.popoutLeaf) {
-        console.warn("FloatingIndicator: openPopoutLeaf returned null");
-        this.isVisible = false;
-        return;
-      }
-      // Allow the popout window to initialize before configuring
-      setTimeout(() => this._configurePopout(), 100);
-    } catch (err) {
-      console.warn("FloatingIndicator: Failed to create popout:", err);
+      return (window as any).require("@electron/remote");
+    } catch {
+      return null;
+    }
+  }
+
+  /** Create a raw Electron BrowserWindow (no Obsidian chrome). */
+  private _createWindow(): void {
+    if (this.floatWin) return;
+
+    const remote = this._getRemote();
+    if (!remote?.BrowserWindow) {
+      console.warn("FloatingIndicator: @electron/remote not available");
       this.isVisible = false;
-      this.popoutLeaf = null;
+      return;
     }
-  }
 
-  /** Configure the popout window: size, position, always-on-top, and UI. */
-  private _configurePopout(): void {
-    if (!this.popoutLeaf) return;
+    const pos = this._calculatePosition(remote);
 
-    try {
-      const containerEl = this.popoutLeaf.view?.containerEl;
-      const popoutWindow = (containerEl as any)?.win;
-      const electronWindow = popoutWindow?.electronWindow;
+    this.floatWin = new remote.BrowserWindow({
+      x: pos.x,
+      y: pos.y,
+      width: WIN_WIDTH,
+      height: WIN_HEIGHT,
+      frame: false,
+      transparent: false,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      focusable: true,
+      show: false,
+      backgroundColor: "#1e1e1e",
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
 
-      if (!electronWindow) {
-        console.warn("FloatingIndicator: Cannot access Electron window from popout leaf");
-        this._destroyPopout();
-        return;
+    // Load inline HTML
+    this.floatWin.loadURL(
+      "data:text/html;charset=utf-8," + encodeURIComponent(buildFloatHtml()),
+    );
+
+    // Once content is rendered, wire button clicks and show
+    this.floatWin.webContents.once("did-finish-load", () => {
+      if (!this.floatWin || !this.isVisible) return;
+
+      // Inject click handlers that signal back via title change
+      this.floatWin.webContents.executeJavaScript(`
+        document.getElementById("stop").addEventListener("click", () => {
+          document.title = "action:stop";
+        });
+        document.getElementById("nav").addEventListener("click", () => {
+          document.title = "action:nav";
+        });
+      `);
+
+      this.floatWin.showInactive();
+    });
+
+    // Listen for title changes as button-click signals
+    this.floatWin.on("page-title-updated", (_e: any, title: string) => {
+      if (title === "action:stop") {
+        this.callbacks.onStop();
+        this.deactivate();
+      } else if (title === "action:nav") {
+        this.callbacks.onNavigate();
+        this.hide();
       }
+    });
 
-      electronWindow.setAlwaysOnTop(true, "floating");
-      electronWindow.setSkipTaskbar(true);
-      electronWindow.setMinimumSize(PANEL_WIDTH, PANEL_HEIGHT);
-      electronWindow.setResizable(false);
-      electronWindow.setMinimizable(false);
-      electronWindow.setMaximizable(false);
+    // Edge-snap on drag release
+    this.floatWin.on("moved", () => {
+      this._edgeSnap(remote);
+    });
 
-      const bounds = this._calculateBounds(popoutWindow);
-      electronWindow.setBounds(bounds);
+    // Clean up reference if window is closed externally
+    this.floatWin.on("closed", () => {
+      this.floatWin = null;
+      this.isVisible = false;
+    });
+  }
 
-      this._renderUI(containerEl, popoutWindow);
-    } catch (err) {
-      console.warn("FloatingIndicator: Failed to configure popout:", err);
-      this._destroyPopout();
+  /** Snap window to nearest horizontal screen edge after drag. */
+  private _edgeSnap(remote: any): void {
+    if (!this.floatWin || !remote?.screen) return;
+    try {
+      const [x, y] = this.floatWin.getPosition();
+      const [w] = this.floatWin.getSize();
+      const display = remote.screen.getDisplayNearestPoint({ x, y });
+      const area = display.workArea;
+      const midpoint = area.x + area.width / 2;
+      const snappedX = (x + w / 2) < midpoint
+        ? area.x + EDGE_MARGIN
+        : area.x + area.width - w - EDGE_MARGIN;
+      this.floatWin.setPosition(snappedX, y);
+    } catch {
+      // Screen API issue; skip snapping
     }
   }
 
-  /** Calculate pixel bounds for the panel based on the configured position. */
-  private _calculateBounds(
-    popoutWindow: any,
-  ): { x: number; y: number; width: number; height: number } {
+  /** Calculate initial position based on configured placement. */
+  private _calculatePosition(remote: any): { x: number; y: number } {
     let screenWidth = 1920;
     let screenHeight = 1080;
     let originX = 0;
     let originY = 0;
 
     try {
-      const remote =
-        popoutWindow?.require?.("@electron/remote") ??
-        (window as any).require("@electron/remote");
-
       if (remote?.screen) {
         const display = remote.screen.getPrimaryDisplay();
         const workArea = display.workArea;
@@ -186,139 +275,31 @@ export class FloatingIndicator {
 
     const positions: Record<IndicatorPosition, { x: number; y: number }> = {
       "top-right": {
-        x: originX + screenWidth - PANEL_WIDTH - EDGE_MARGIN,
+        x: originX + screenWidth - WIN_WIDTH - EDGE_MARGIN,
         y: originY + EDGE_MARGIN,
       },
       "center-right": {
-        x: originX + screenWidth - PANEL_WIDTH - EDGE_MARGIN,
-        y: originY + Math.floor((screenHeight - PANEL_HEIGHT) / 2),
+        x: originX + screenWidth - WIN_WIDTH - EDGE_MARGIN,
+        y: originY + Math.floor((screenHeight - WIN_HEIGHT) / 2),
       },
       "bottom-left": {
         x: originX + EDGE_MARGIN,
-        y: originY + screenHeight - PANEL_HEIGHT - EDGE_MARGIN,
+        y: originY + screenHeight - WIN_HEIGHT - EDGE_MARGIN,
       },
     };
 
-    const pos = positions[this.position] ?? positions["top-right"];
-    return { x: pos.x, y: pos.y, width: PANEL_WIDTH, height: PANEL_HEIGHT };
+    return positions[this.position] ?? positions["center-right"];
   }
 
-  /** Inject minimal HTML/CSS into the popout leaf, hiding Obsidian chrome. */
-  private _renderUI(containerEl: HTMLElement, popoutWindow: any): void {
-    const doc: Document = popoutWindow?.document ?? containerEl.ownerDocument;
-    if (!doc) return;
-
-    // Hide all Obsidian chrome and fill window with our panel
-    const style = doc.createElement("style");
-    style.textContent = `
-      html, body {
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-        width: 100% !important;
-        height: 100% !important;
-        background: var(--background-secondary, #1e1e1e) !important;
-      }
-      .app-container, .workspace, .workspace-split,
-      .workspace-leaf, .workspace-leaf-content {
-        width: 100% !important;
-        height: 100% !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        background: var(--background-secondary, #1e1e1e) !important;
-      }
-      .titlebar, .workspace-tab-header-container, .status-bar,
-      .workspace-ribbon, .sidebar-toggle-button,
-      .workspace-tab-header, .view-header {
-        display: none !important;
-      }
-      .mn-float-panel {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        height: 100%;
-        background: var(--background-secondary, #1e1e1e);
-        font-family: var(--font-interface, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-        border: 1px solid var(--background-modifier-border, rgba(255,255,255,0.08));
-      }
-      .mn-float-btn {
-        width: 40px;
-        height: 40px;
-        border: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: var(--radius-m, 8px);
-        transition: background 0.15s;
-      }
-      .mn-float-btn svg { width: 20px; height: 20px; }
-      .mn-float-stop {
-        background: #dc2626 !important;
-      }
-      .mn-float-stop:hover {
-        background: #b91c1c !important;
-      }
-      .mn-float-stop svg { fill: white; }
-      .mn-float-nav {
-        background: var(--background-modifier-hover, rgba(255,255,255,0.08));
-      }
-      .mn-float-nav:hover {
-        background: var(--background-modifier-active-hover, rgba(255,255,255,0.15));
-      }
-      .mn-float-nav svg {
-        stroke: var(--text-muted, #c0c0c0);
-        fill: none;
-      }
-      .mn-float-nav:hover svg {
-        stroke: var(--text-normal, white);
-      }
-    `;
-    doc.head.appendChild(style);
-
-    const contentEl = containerEl.querySelector(".workspace-leaf-content") ?? containerEl;
-    contentEl.innerHTML = "";
-
-    const panel = doc.createElement("div");
-    panel.className = "mn-float-panel";
-
-    const stopBtn = doc.createElement("button");
-    stopBtn.className = "mn-float-btn mn-float-stop";
-    stopBtn.title = "Stop recording";
-    stopBtn.innerHTML =
-      '<svg viewBox="0 0 18 18"><rect x="4" y="4" width="10" height="10" rx="2"/></svg>';
-    stopBtn.addEventListener("click", () => {
-      this.callbacks.onStop();
-      this.deactivate();
-    });
-
-    const navBtn = doc.createElement("button");
-    navBtn.className = "mn-float-btn mn-float-nav";
-    navBtn.title = "Back to Obsidian";
-    navBtn.innerHTML =
-      '<svg viewBox="0 0 18 18"><path d="M6 9L3 12l3 3M3 12h7a4 4 0 0 0 0-8H7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    navBtn.addEventListener("click", () => {
-      this.callbacks.onNavigate();
-      this.hide();
-    });
-
-    panel.appendChild(stopBtn);
-    panel.appendChild(navBtn);
-    contentEl.appendChild(panel);
-  }
-
-  /** Close and detach the popout leaf. */
-  private _destroyPopout(): void {
-    if (this.popoutLeaf) {
+  /** Close and destroy the float window. */
+  private _destroyWindow(): void {
+    if (this.floatWin) {
       try {
-        this.popoutLeaf.detach();
+        this.floatWin.close();
       } catch {
-        // Leaf may already be detached
+        // Window may already be closed
       }
-      this.popoutLeaf = null;
+      this.floatWin = null;
     }
   }
 }

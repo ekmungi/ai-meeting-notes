@@ -231,7 +231,8 @@ def main() -> None:
             print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 
-    print("AI Meeting Notes v0.1.0")
+    from meeting_notes import __version__
+    print(f"AI Meeting Notes v{__version__}")
     print(f"Engine: {config.engine}")
     print(f"Output: {config.output_dir}")
 

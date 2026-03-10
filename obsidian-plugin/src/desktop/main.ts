@@ -1,10 +1,9 @@
 /** Electron main process -- creates windows, manages server, handles IPC. */
 
-import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell, screen } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import { ServerLauncherBase, type HealthCheckFn } from "../shared/server-launcher";
-import { WsClient } from "../shared/ws-client";
 import { serverBaseUrl } from "../shared/types";
 import {
   extractTranscriptBody,
@@ -12,10 +11,15 @@ import {
 } from "../shared/merge-logic";
 import {
   formatFileTimestamp,
+  formatIsoTime,
   sanitizeFilename,
   formatDuration,
 } from "../shared/format-utils";
-import { buildNotesYaml, defaultNotesBody } from "../shared/yaml-builder";
+import {
+  buildNotesYaml,
+  buildTranscriptYaml,
+  defaultNotesBody,
+} from "../shared/yaml-builder";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -55,12 +59,15 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
 let settings: Record<string, unknown> = { ...DEFAULT_SETTINGS };
 let mainWindow: BrowserWindow | null = null;
 let floatWindow: BrowserWindow | null = null;
+let floatReady = false;
 let serverLauncher: ServerLauncherBase | null = null;
-let wsClient: WsClient | null = null;
 let isPaused = false;
 let isRecording = false;
 let currentNotesPath = "";
 let currentTranscriptPath = "";
+let recordingStartTime: Date | null = null;
+let lastTimestampBucket = -1;
+let lastSpeaker: string | null = null;
 
 /* ------------------------------------------------------------------ */
 /*  Health check (Node fetch)                                         */
@@ -130,8 +137,8 @@ function getSessionHistory(): SessionEntry[] {
       const content = fs.readFileSync(fullPath, "utf-8");
       const yamlMatch = content.match(/^---\n([\s\S]*?)\n---/);
       const yaml = yamlMatch ? yamlMatch[1] : "";
-      const typeMatch = yaml.match(/^meeting_type:\s*(.+)$/m);
-      const durMatch = yaml.match(/^duration:\s*(.+)$/m);
+      const typeMatch = yaml.match(/^type:\s*"?([^"\n]+)"?$/m);
+      const durMatch = yaml.match(/^duration:\s*"?([^"\n]+)"?$/m);
       entries.push({
         title: typeMatch?.[1]?.trim() || path.basename(file, ".md"),
         duration: durMatch?.[1]?.trim() || "",
@@ -155,6 +162,8 @@ function resolveOutputDir(): string {
 function resolveServerExe(): string {
   const configured = settings.server_exe_path as string;
   if (configured && fs.existsSync(configured)) return configured;
+
+  /* Packaged app: server bundled as extraResource */
   const bundled = path.join(
     process.resourcesPath,
     "server",
@@ -162,12 +171,120 @@ function resolveServerExe(): string {
     "ai-meeting-notes-server.exe"
   );
   if (fs.existsSync(bundled)) return bundled;
+
+  /* Dev mode: server exe in releases/ relative to project root.
+     __dirname is dist-desktop/desktop/ -> 3 levels up = project root */
+  const devPath = path.join(
+    __dirname, "..", "..", "..",
+    "releases",
+    "ai-meeting-notes-server",
+    "ai-meeting-notes-server.exe"
+  );
+  if (fs.existsSync(devPath)) return devPath;
+
   return "";
+}
+
+/* ------------------------------------------------------------------ */
+/*  Transcript file writer                                            */
+/* ------------------------------------------------------------------ */
+
+/** Timestamp interval in seconds (matches Python MarkdownWriter). */
+const TIMESTAMP_INTERVAL_S = 300;
+
+/** Format elapsed seconds as HH:MM:SS. */
+function formatElapsedTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Create the transcript file with YAML header. */
+function initTranscriptFile(filePath: string, startTime: Date): void {
+  const yaml = buildTranscriptYaml(startTime, path.basename(currentNotesPath, ".md"));
+  fs.writeFileSync(filePath, yaml);
+  lastTimestampBucket = -1;
+  lastSpeaker = null;
+}
+
+/** Append a final transcript segment to the transcript file. */
+function appendTranscriptSegment(
+  text: string,
+  timestampStart: number,
+  speaker: string | null,
+): void {
+  if (!currentTranscriptPath || !fs.existsSync(currentTranscriptPath)) return;
+
+  let output = "";
+
+  /* Timestamp marker every 5 minutes */
+  const totalSeconds = Math.max(0, Math.floor(timestampStart));
+  const bucket =
+    Math.floor(totalSeconds / TIMESTAMP_INTERVAL_S) * TIMESTAMP_INTERVAL_S;
+  if (bucket > lastTimestampBucket) {
+    lastTimestampBucket = bucket;
+    output += `**[${formatElapsedTimestamp(bucket)}]**\n\n`;
+  }
+
+  /* Speaker label on change */
+  let line = text.trim();
+  if (speaker && speaker !== lastSpeaker) {
+    line = `**[Speaker ${speaker}]** ${line}`;
+    lastSpeaker = speaker;
+  }
+
+  output += line + "\n\n";
+  fs.appendFileSync(currentTranscriptPath, output);
+}
+
+/** Update notes file YAML frontmatter with end_time and duration. */
+function finalizeNotesFile(
+  notesPath: string,
+  durationSeconds: number,
+): void {
+  if (!notesPath || !fs.existsSync(notesPath)) return;
+  const endTime = new Date();
+  const endTimeStr = formatIsoTime(endTime);
+  const durationStr = formatDuration(durationSeconds);
+  let content = fs.readFileSync(notesPath, "utf-8");
+  content = content.replace(
+    "tags: [meeting-notes]\n---",
+    `end_time: "${endTimeStr}"\n` +
+    `duration: "${durationStr}"\n` +
+    "tags: [meeting-notes]\n---",
+  );
+  fs.writeFileSync(notesPath, content);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Windows                                                           */
 /* ------------------------------------------------------------------ */
+
+/** Calculate float window position based on settings. */
+function getFloatPosition(): { x: number; y: number } {
+  const display = screen.getPrimaryDisplay();
+  const { width, height } = display.workAreaSize;
+  const winWidth = 58;
+  const winHeight = 116;
+  const margin = 4;
+  const x = width - winWidth - margin;
+  const position = (settings.floating_indicator_position as string) || "center-right";
+  let y: number;
+  switch (position) {
+    case "top-right":
+      y = margin;
+      break;
+    case "bottom-left":
+      y = height - winHeight - margin;
+      break;
+    case "center-right":
+    default:
+      y = Math.floor((height - winHeight) / 2);
+      break;
+  }
+  return { x, y };
+}
 
 /** Create the main application window (560x610, frameless). */
 function createMainWindow(): void {
@@ -185,7 +302,7 @@ function createMainWindow(): void {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 
   mainWindow.on("blur", () => {
-    if (isRecording && floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
+    if (isRecording && floatReady && floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
   });
   mainWindow.on("focus", () => {
     if (floatWindow && !floatWindow.isDestroyed()) floatWindow.hide();
@@ -198,15 +315,18 @@ function createMainWindow(): void {
 
 /** Create the floating indicator window (hidden until recording). */
 function createFloatWindow(): void {
+  const pos = getFloatPosition();
   floatWindow = new BrowserWindow({
-    width: 72,
-    height: 120,
+    width: 58,
+    height: 116,
+    x: pos.x,
+    y: pos.y,
     frame: false,
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     transparent: true,
-    focusable: false,
+    focusable: true,
     minimizable: false,
     maximizable: false,
     show: false,
@@ -216,6 +336,25 @@ function createFloatWindow(): void {
       nodeIntegration: false,
     },
   });
+  floatReady = false;
+  floatWindow.once("ready-to-show", () => { floatReady = true; });
+  floatWindow.webContents.once("did-finish-load", () => { floatReady = true; });
+
+  /* Snap to nearest horizontal edge after drag ends. */
+  floatWindow.on("moved", () => {
+    if (!floatWindow || floatWindow.isDestroyed()) return;
+    const [x, y] = floatWindow.getPosition();
+    const [w] = floatWindow.getSize();
+    const display = screen.getDisplayNearestPoint({ x, y });
+    const { x: areaX, width: areaW } = display.workArea;
+    const midpoint = areaX + areaW / 2;
+    const margin = 4;
+    const snappedX = (x + w / 2) < midpoint
+      ? areaX + margin                   /* snap left */
+      : areaX + areaW - w - margin;      /* snap right */
+    floatWindow.setPosition(snappedX, y);
+  });
+
   floatWindow.loadFile(path.join(__dirname, "renderer", "float.html"));
 }
 
@@ -277,34 +416,33 @@ function registerIpcHandlers(): void {
         const result = await resp.json();
         if (!resp.ok) return { error: result.detail || "Server error" };
 
-        /* Create notes file */
+        /* Create notes file and transcript file */
         const now = new Date();
+        recordingStartTime = now;
         const stamp = formatFileTimestamp(now);
         const safeName = sanitizeFilename(meetingType);
         const baseName = `${stamp} - ${safeName}`;
         currentNotesPath = path.join(outputDir, `${baseName}.md`);
-        currentTranscriptPath = result.output_path || "";
+        currentTranscriptPath = path.join(outputDir, `${baseName}_transcript.md`);
 
-        const yaml = buildNotesYaml(now, "", meetingType);
+        const transcriptBaseName = `${baseName}_transcript`;
+        const yaml = buildNotesYaml(now, transcriptBaseName, meetingType);
         const body = defaultNotesBody();
         fs.writeFileSync(currentNotesPath, yaml + body);
+        initTranscriptFile(currentTranscriptPath, now);
 
         /* Open in editor if configured */
         if (settings.open_editor_on_start) {
           shell.openPath(currentNotesPath);
         }
 
-        /* Connect WebSocket for live transcript */
-        wsClient = new WsClient(baseUrl);
-        wsClient.onMessage = (msg) => {
-          mainWindow?.webContents.send("server-message", msg);
-        };
-        wsClient.connect();
+        /* Return WS URL for renderer to connect (browser WebSocket API) */
+        const wsUrl = baseUrl.replace(/^http/, "ws") + "/ws";
 
         isPaused = false;
         isRecording = true;
-        if (floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
-        return { engine_name: result.engine || engine, notes_path: currentNotesPath };
+        if (floatReady && floatWindow && !floatWindow.isDestroyed()) floatWindow.show();
+        return { engine_name: result.engine || engine, notes_path: currentNotesPath, ws_url: wsUrl };
       } catch (err) {
         return { error: `Failed to start: ${err}` };
       }
@@ -319,16 +457,19 @@ function registerIpcHandlers(): void {
       const resp = await fetch(`${baseUrl}/session/stop`, { method: "POST" });
       const result = await resp.json();
 
-      wsClient?.disconnect();
-      wsClient = null;
+      /* WebSocket cleanup is handled by renderer */
       isPaused = false;
       isRecording = false;
+      recordingStartTime = null;
       if (floatWindow && !floatWindow.isDestroyed()) floatWindow.hide();
 
-      currentTranscriptPath = result.output_path || currentTranscriptPath;
+      /* Update notes file with end_time and duration */
+      const duration = result.duration_seconds || 0;
+      finalizeNotesFile(currentNotesPath, duration);
+
       return {
-        output_path: result.output_path,
-        duration_seconds: result.duration_seconds,
+        output_path: currentTranscriptPath,
+        duration_seconds: duration,
       };
     } catch (err) {
       return { error: `Failed to stop: ${err}` };
@@ -402,6 +543,14 @@ function registerIpcHandlers(): void {
     }
   });
 
+  /* Transcript file writing (renderer -> main for file I/O) */
+  ipcMain.handle(
+    "write-transcript-segment",
+    (_e, text: string, timestampStart: number, speaker: string | null) => {
+      appendTranscriptSegment(text, timestampStart, speaker);
+    }
+  );
+
   /* File operations */
   ipcMain.handle("browse-directory", async () => {
     if (!mainWindow) return null;
@@ -421,6 +570,9 @@ function registerIpcHandlers(): void {
 
   /* Float window actions */
   ipcMain.on("float-stop", () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+    if (floatWindow && !floatWindow.isDestroyed()) floatWindow.hide();
     mainWindow?.webContents.send("float-stop-clicked");
   });
   ipcMain.on("float-navigate", () => {

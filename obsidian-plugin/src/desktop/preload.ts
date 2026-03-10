@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld("api", {
   mergeNotes: () => ipcRenderer.invoke("merge-notes"),
   discardTranscript: () => ipcRenderer.invoke("discard-transcript"),
 
+  /* Transcript file writing (renderer -> main for file I/O) */
+  writeTranscriptSegment: (text: string, timestampStart: number, speaker: string | null) =>
+    ipcRenderer.invoke("write-transcript-segment", text, timestampStart, speaker),
+
   /* File operations */
   browseDirectory: () => ipcRenderer.invoke("browse-directory"),
   openFile: (filePath: string) => ipcRenderer.invoke("open-file", filePath),
@@ -28,9 +32,9 @@ contextBridge.exposeInMainWorld("api", {
   minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
   closeWindow: () => ipcRenderer.invoke("close-window"),
 
-  /* Server messages (main -> renderer) */
-  onServerMessage: (cb: (msg: unknown) => void) => {
-    ipcRenderer.on("server-message", (_e, msg) => cb(msg));
+  /* Float window stop forwarded from main process */
+  onFloatStop: (cb: () => void) => {
+    ipcRenderer.on("float-stop-clicked", () => cb());
   },
 
   /* Float window actions (float renderer -> main) */

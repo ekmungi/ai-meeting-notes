@@ -28,12 +28,91 @@ var elStopIcon = document.getElementById("stop-icon");
 
 var isRecording = false;
 var isPaused = false;
+var wsConnection = null;
+var wsHeartbeat = null;
 var activeRowEl = null;
 var elapsedInterval = null;
 var recordingStartTime = null;
 var pausedElapsed = 0;
 var segmentCount = 0;
 var currentNotesPath = "";
+var silenceDismissed = false;
+var silenceAutoStopTimer = null;
+var silenceToastEl = null;
+
+// -- WebSocket Connection (renderer owns WS lifecycle) --
+
+/**
+ * Connect to the server WebSocket for live transcript streaming.
+ * Uses the browser WebSocket API (available natively in Electron renderer).
+ * @param {string} wsUrl - WebSocket URL (ws://127.0.0.1:PORT/ws).
+ */
+function connectWebSocket(wsUrl) {
+  disconnectWebSocket();
+
+  try {
+    wsConnection = new WebSocket(wsUrl);
+  } catch (err) {
+    console.error("WebSocket connection failed:", err);
+    return;
+  }
+
+  wsConnection.onopen = function () {
+    wsHeartbeat = setInterval(function () {
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 15000);
+  };
+
+  wsConnection.onmessage = function (event) {
+    try {
+      var msg = JSON.parse(event.data);
+      handleServerMessage(msg);
+
+      /* Write final transcript segments to file via main process IPC */
+      if (msg.type === "transcript" && !msg.is_partial && msg.text && msg.text.trim()) {
+        window.api.writeTranscriptSegment(
+          msg.text,
+          msg.timestamp_start,
+          msg.speaker || null
+        );
+      }
+    } catch (err) {
+      /* ignore malformed messages */
+    }
+  };
+
+  wsConnection.onerror = function (err) {
+    console.error("WebSocket error:", err);
+  };
+
+  wsConnection.onclose = function () {
+    if (wsHeartbeat) {
+      clearInterval(wsHeartbeat);
+      wsHeartbeat = null;
+    }
+  };
+}
+
+/** Send a JSON message to the server via WebSocket. */
+function sendWsMessage(msg) {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify(msg));
+  }
+}
+
+/** Disconnect the WebSocket and clean up heartbeat. */
+function disconnectWebSocket() {
+  if (wsHeartbeat) {
+    clearInterval(wsHeartbeat);
+    wsHeartbeat = null;
+  }
+  if (wsConnection) {
+    wsConnection.close();
+    wsConnection = null;
+  }
+}
 
 // -- Initialization --
 
@@ -55,9 +134,6 @@ async function init() {
   } catch (err) {
     console.error("Init error:", err);
   }
-
-  // Register server message handler for live updates
-  window.api.onServerMessage(handleServerMessage);
 }
 
 // -- Server Message Router --
@@ -175,6 +251,9 @@ elBtnStart.addEventListener("click", async function () {
       return;
     }
     onRecordingStarted(result.engine_name);
+    if (result.ws_url) {
+      connectWebSocket(result.ws_url);
+    }
   } catch (err) {
     showToast("Failed to start recording: " + err, "error");
     elBtnStart.disabled = false;
@@ -329,6 +408,10 @@ function updateEngineStatus(message) {
  * @param {string|null} outputPath - Path to saved transcript, or null on error.
  */
 function onRecordingStopped(outputPath) {
+  disconnectWebSocket();
+  clearSilenceAutoStop();
+  removeSilenceToast();
+  silenceDismissed = false;
   isRecording = false;
   isPaused = false;
   elConsentCheck.checked = false;
@@ -440,22 +523,97 @@ function deleteSession(rowEl, filePath, title) {
 // -- Silence Detection Callbacks --
 
 /**
- * Update status bar with silence duration.
+ * Update status bar with silence duration and show extend/dismiss toast at 100s.
  * @param {number} seconds - Seconds of silence (0 = speech resumed).
  */
 function updateSilenceStatus(seconds) {
-  if (seconds > 0) {
-    elStatusText.textContent = "Silence detected (" + seconds + "s)";
-    elStatusText.className = "status-bar__text status-bar__text--silence";
-  } else {
+  if (seconds <= 0) {
     elStatusText.textContent = "Recording in progress";
     elStatusText.className = "status-bar__text";
+    silenceDismissed = false;
+    clearSilenceAutoStop();
+    return;
+  }
+
+  elStatusText.textContent = "Silence detected (" + seconds + "s)";
+  elStatusText.className = "status-bar__text status-bar__text--silence";
+
+  if (seconds >= 100 && !silenceDismissed && !silenceAutoStopTimer) {
+    onSilenceWarning();
   }
 }
 
-/** Show a warning toast at 100s of silence. */
+/** Show silence warning toast with Extend / Dismiss / Stop buttons. */
 function onSilenceWarning() {
-  showToast("Extended silence detected. Recording will auto-stop at 120s.", "warning");
+  /* Remove any existing silence toast before creating a new one */
+  removeSilenceToast();
+
+  silenceToastEl = showToast(
+    'No speech detected for 100s. Auto-stop at 120s.' +
+    '<div style="display:flex;gap:6px;margin-top:6px">' +
+    '<button class="toast-btn" id="silence-extend">Extend</button>' +
+    '<button class="toast-btn" id="silence-dismiss">Dismiss</button>' +
+    '<button class="toast-btn" id="silence-stop">Stop</button>' +
+    '</div>',
+    "warning",
+    0,    /* persistent */
+    true  /* html */
+  );
+
+  /* Wire button handlers after DOM insertion */
+  var extBtn = document.getElementById("silence-extend");
+  var disBtn = document.getElementById("silence-dismiss");
+  var stpBtn = document.getElementById("silence-stop");
+  if (extBtn) extBtn.addEventListener("click", extendSilence);
+  if (disBtn) disBtn.addEventListener("click", dismissSilence);
+  if (stpBtn) stpBtn.addEventListener("click", stopFromSilence);
+
+  /* Auto-stop after 20s if user does not interact */
+  silenceAutoStopTimer = setTimeout(function () {
+    silenceAutoStopTimer = null;
+    removeSilenceToast();
+    showToast("Auto-stopping: 120s of silence detected.", "error");
+    document.getElementById("btn-stop").click();
+  }, 20000);
+}
+
+/** Extend: reset server silence counter, clear auto-stop. */
+function extendSilence() {
+  sendWsMessage({ type: "reset_silence" });
+  clearSilenceAutoStop();
+  removeSilenceToast();
+  silenceDismissed = false;
+  showToast("Silence timer reset.", "info");
+}
+
+/** Dismiss: hide notice permanently for this session. */
+function dismissSilence() {
+  silenceDismissed = true;
+  clearSilenceAutoStop();
+  removeSilenceToast();
+}
+
+/** Stop recording from silence warning. */
+function stopFromSilence() {
+  clearSilenceAutoStop();
+  removeSilenceToast();
+  document.getElementById("btn-stop").click();
+}
+
+/** Remove the persistent silence toast from DOM. */
+function removeSilenceToast() {
+  if (silenceToastEl) {
+    silenceToastEl.remove();
+    silenceToastEl = null;
+  }
+}
+
+/** Clear any pending auto-stop timer. */
+function clearSilenceAutoStop() {
+  if (silenceAutoStopTimer) {
+    clearTimeout(silenceAutoStopTimer);
+    silenceAutoStopTimer = null;
+  }
 }
 
 // -- Live Transcript --
@@ -533,8 +691,8 @@ elBtnClose.addEventListener("click", function () {
 
 // -- Float Stop Handling --
 
-window.api.onServerMessage(function (msg) {
-  // Also handle float-stop-clicked forwarded from main
+window.api.onFloatStop(function () {
+  if (isRecording) elBtnStop.click();
 });
 
 // -- Keyboard Shortcuts --

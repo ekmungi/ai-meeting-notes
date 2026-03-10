@@ -509,6 +509,8 @@ export default class AIMeetingNotesPlugin extends Plugin {
         clearTimeout(this.silenceAutoStopTimer);
         this.silenceAutoStopTimer = null;
       }
+      // Tell server to reset its silence counter so it stops broadcasting
+      this.wsClient?.send({ type: "reset_silence" });
     });
 
     const dismissBtn = document.createElement("button");

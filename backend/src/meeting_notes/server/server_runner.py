@@ -110,6 +110,11 @@ class ServerRunner:
             def _broadcast_cb(segment: TranscriptSegment) -> None:
                 if not segment.text.strip():
                     return
+                # Final transcript proves speech is happening — reset silence
+                # monitor even if RMS is below threshold (e.g. low-volume
+                # system audio that AssemblyAI can still decode).
+                if not segment.is_partial and self._silence_monitor:
+                    self._silence_monitor.reset_silence()
                 if self._loop and self._loop.is_running():
                     asyncio.run_coroutine_threadsafe(
                         self._ws_manager.broadcast_transcript(
@@ -214,6 +219,12 @@ class ServerRunner:
             await self._ws_manager.broadcast_status("stopped", elapsed)
             logger.info("Server session stopped after %.1fs", elapsed)
             return elapsed
+
+    def reset_silence(self) -> None:
+        """Reset the silence timer (called when client clicks Extend)."""
+        if self._silence_monitor:
+            self._silence_monitor.reset_silence()
+            logger.info("Silence monitor reset by client request")
 
     async def pause(self) -> float:
         """Pause the active recording. Returns elapsed seconds at pause point."""

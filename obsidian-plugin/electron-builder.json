@@ -10,12 +10,35 @@
   ],
   "extraResources": [
     {
-      "from": "../releases/ai-meeting-notes-server/ai-meeting-notes-server.exe",
-      "to": "server/ai-meeting-notes-server.exe"
+      "from": "../releases/ai-meeting-notes-server",
+      "to": "server/ai-meeting-notes-server"
+    },
+    {
+      "from": "main.js",
+      "to": "obsidian-plugin/main.js"
+    },
+    {
+      "from": "manifest.json",
+      "to": "obsidian-plugin/manifest.json"
+    },
+    {
+      "from": "styles.css",
+      "to": "obsidian-plugin/styles.css"
     }
   ],
   "win": {
-    "target": "portable",
+    "target": {
+      "target": "nsis",
+      "arch": ["x64"]
+    },
     "icon": "src/desktop/renderer/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false,
+    "shortcutName": "AI Meeting Notes",
+    "include": "installer.nsh"
   }
 }

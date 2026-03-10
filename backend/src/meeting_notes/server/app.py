@@ -228,7 +228,11 @@ async def ws_endpoint(ws: WebSocket):
     if not _ws_manager:
         await ws.close(code=1013)  # 1013 = Try Again Later
         return
-    await websocket_endpoint(ws, _ws_manager)
+    await websocket_endpoint(
+        ws,
+        _ws_manager,
+        on_reset_silence=_runner.reset_silence if _runner else None,
+    )
 
 
 _ALLOWED_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})

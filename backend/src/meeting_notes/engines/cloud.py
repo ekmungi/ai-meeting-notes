@@ -310,8 +310,13 @@ class CloudEngine(TranscriptionEngine):
                         #   2. turn_is_formatted=True   — formatted text, after NLP
                         # We only act on (2). Everything else is live preview only.
                         self._last_turn_end_time = time.monotonic()
-                        # Extract speaker label if diarization is enabled
-                        speaker = getattr(event, "speaker", None)
+                        # Derive speaker label from turn_order (0-indexed int
+                        # that increments on speaker change). Map to letters:
+                        # 0→"A", 1→"B", etc. Only when diarization is enabled.
+                        speaker = None
+                        if self._speaker_labels:
+                            turn_idx = getattr(event, "turn_order", 0) or 0
+                            speaker = chr(ord("A") + (turn_idx % 26))
                         self._handle_final_segment(text, elapsed, speaker=speaker)
 
                     else:
@@ -362,26 +367,13 @@ class CloudEngine(TranscriptionEngine):
             preset = ENDPOINTING_PRESETS.get(self._endpointing, ENDPOINTING_PRESETS["conservative"])
             logger.info("Using endpointing preset: %s → %s", self._endpointing, preset)
 
-            # Build streaming params, optionally enabling speaker diarization.
-            # The SDK's StreamingParameters does not yet have a speaker_labels
-            # field, so we subclass it to inject the query parameter.
-            if self._speaker_labels:
-                class _SpeakerParams(StreamingParameters):
-                    """Extends StreamingParameters with speaker_labels support."""
-                    speaker_labels: bool | None = None
-
-                params = _SpeakerParams(
-                    sample_rate=self._sample_rate,
-                    format_turns=True,
-                    speaker_labels=True,
-                    **preset,
-                )
-            else:
-                params = StreamingParameters(
-                    sample_rate=self._sample_rate,
-                    format_turns=True,
-                    **preset,
-                )
+            # Build streaming params. Speaker diarization uses turn_order
+            # from the Turn event (not a streaming API parameter).
+            params = StreamingParameters(
+                sample_rate=self._sample_rate,
+                format_turns=True,
+                **preset,
+            )
 
             client.connect(params)
 

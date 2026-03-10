@@ -21,19 +21,35 @@ function escapeHtml(str) {
  * @param {string} message - Text to display.
  * @param {string} type - One of "info", "success", "warning", "error".
  */
-function showToast(message, type) {
+/**
+ * Show a toast notification.
+ * @param {string} message - Text or HTML content.
+ * @param {string} [type="info"] - Toast style: info, warning, error.
+ * @param {number} [durationMs=4000] - Auto-dismiss after ms. 0 = persistent until removed.
+ * @param {boolean} [html=false] - If true, message is inserted as innerHTML.
+ * @returns {HTMLElement} The toast element (for manual removal).
+ */
+function showToast(message, type, durationMs, html) {
   type = type || "info";
+  if (durationMs === undefined || durationMs === null) durationMs = 4000;
   var toast = document.createElement("div");
   toast.className = "toast toast--" + type;
-  toast.textContent = message;
+  if (html) {
+    toast.innerHTML = message;
+  } else {
+    toast.textContent = message;
+  }
   var container = document.getElementById("toast-container");
   if (container) container.appendChild(toast);
 
-  setTimeout(function () {
-    toast.style.opacity = "0";
-    toast.style.transition = "opacity 0.3s ease";
-    setTimeout(function () { toast.remove(); }, 300);
-  }, 4000);
+  if (durationMs > 0) {
+    setTimeout(function () {
+      toast.style.opacity = "0";
+      toast.style.transition = "opacity 0.3s ease";
+      setTimeout(function () { toast.remove(); }, 300);
+    }, durationMs);
+  }
+  return toast;
 }
 
 // -- Settings DOM References --

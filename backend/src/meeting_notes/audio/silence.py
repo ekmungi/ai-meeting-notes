@@ -139,12 +139,20 @@ class SilenceMonitor:
             self._last_callback_time = now
             self._on_silence(elapsed)
 
+    def reset_silence(self) -> None:
+        """Reset the silence timer while preserving calibration.
+
+        Called when transcript activity proves speech is happening (even if
+        RMS is below threshold), or when the client clicks Extend.
+        """
+        self._silence_start = None
+        self._last_callback_time = None
+        self._is_silent = False
+        self._silent_seconds = 0.0
+
     def reset(self) -> None:
         """Reset to initial state (pre-calibration)."""
         self._calibration_rms = []
         self._rms_threshold = 0.0
         self._calibrated = False
-        self._silence_start = None
-        self._last_callback_time = None
-        self._is_silent = False
-        self._silent_seconds = 0.0
+        self.reset_silence()

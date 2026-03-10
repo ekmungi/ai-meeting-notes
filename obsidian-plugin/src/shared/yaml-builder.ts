@@ -59,7 +59,6 @@ export function defaultNotesBody(embedLink = ""): string {
     "### Action Items",
     "- ",
     "",
-    "## Transcript",
     embedLink,
     "",
   ].join("\n");

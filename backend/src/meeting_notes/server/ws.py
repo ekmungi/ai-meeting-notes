@@ -97,19 +97,32 @@ class ConnectionManager:
         })
 
 
-async def websocket_endpoint(ws: WebSocket, manager: ConnectionManager) -> None:
-    """Handle a single WebSocket connection with heartbeat."""
+async def websocket_endpoint(
+    ws: WebSocket,
+    manager: ConnectionManager,
+    on_reset_silence: callable | None = None,
+) -> None:
+    """Handle a single WebSocket connection with heartbeat.
+
+    Args:
+        ws: The WebSocket connection.
+        manager: Connection manager for broadcast.
+        on_reset_silence: Optional callback invoked when client sends reset_silence.
+    """
     await manager.connect(ws)
     try:
         while True:
             data = await ws.receive_text()
             try:
                 msg = json.loads(data)
-                if msg.get("type") == "ping":
+                msg_type = msg.get("type")
+                if msg_type == "ping":
                     await ws.send_text(json.dumps({
                         "type": "pong",
                         "timestamp": time.time(),
                     }))
+                elif msg_type == "reset_silence" and on_reset_silence:
+                    on_reset_silence()
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:

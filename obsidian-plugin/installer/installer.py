@@ -6,7 +6,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-PLUGIN_ID = "obsidian-ai-meeting-notes"
+PLUGIN_ID = "ai-meeting-notes"
 PLUGIN_FILES = ["main.js", "manifest.json", "styles.css"]
 
 

@@ -49,7 +49,6 @@ export class TranscriptView {
    * partial:           italic partial text appended at the end, or ""
    * segmentCount:      total final segments written
    */
-  private headerLength = 0;
   private completedContent = "";
   private currentParaTexts: string[] = [];
   private currentParaBucket = -1;
@@ -64,6 +63,30 @@ export class TranscriptView {
   }
 
   /**
+   * Find the end of the transcript file header (YAML + ## Transcript heading).
+   * Returns the character index where transcript body content starts.
+   * Uses dynamic search instead of a fixed offset so Obsidian's metadata
+   * cache changes don't corrupt the transcript.
+   */
+  private _findBodyStart(content: string): number {
+    const marker = "## Transcript\n";
+    const idx = content.indexOf(marker);
+    if (idx >= 0) {
+      // Body starts after the heading + one blank line
+      const afterHeading = idx + marker.length;
+      // Skip one newline if present (the blank line after ## Transcript)
+      if (content[afterHeading] === "\n") return afterHeading + 1;
+      return afterHeading;
+    }
+    // Fallback: after YAML frontmatter
+    if (content.startsWith("---")) {
+      const endIdx = content.indexOf("---", 3);
+      if (endIdx > 0) return endIdx + 4; // "---\n"
+    }
+    return 0;
+  }
+
+  /**
    * Create two files for the recording and open them side-by-side.
    * Returns the notes file (this.file). The transcript file is stored
    * in this.transcriptFile and receives all streaming updates.
@@ -71,7 +94,6 @@ export class TranscriptView {
   async createNote(engine: string, meetingType = "Meeting Notes"): Promise<TFile> {
     const now = new Date();
     this.startTime = now;
-    this.headerLength = 0;
     this.completedContent = "";
     this.currentParaTexts = [];
     this.currentParaBucket = -1;
@@ -106,19 +128,15 @@ export class TranscriptView {
     const transcriptPath = normalizePath(`${transcriptFolderPath}/${transcriptBaseName}.md`);
     const transcriptHeader = buildTranscriptYaml(now, baseName);
     this.transcriptFile = await this.app.vault.create(transcriptPath, transcriptHeader);
-    this.headerLength = transcriptHeader.length;
 
     // Create notes file (in notes folder)
     const notesPath = normalizePath(`${notesFolderPath}/${baseName}.md`);
     const notesContent = await this._buildNotesContent(meetingType, now, transcriptBaseName);
     this.file = await this.app.vault.create(notesPath, notesContent);
 
-    // Open side-by-side: notes left, transcript right
-    const leftLeaf = this.app.workspace.getLeaf("tab");
-    await leftLeaf.openFile(this.file);
-
-    const rightLeaf = this.app.workspace.getLeaf("split", "vertical");
-    await rightLeaf.openFile(this.transcriptFile);
+    // Open notes file only — the embedded transcript link shows a live preview.
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(this.file);
 
     return this.file;
   }
@@ -168,12 +186,14 @@ export class TranscriptView {
       // Ensure transcript embed is present somewhere in the body
       if (!templateBody.includes(embedLink)) {
         if (templateBody.includes("## Transcript")) {
+          // Replace heading + embed (keep heading if user explicitly has it)
           templateBody = templateBody.replace(
             /## Transcript\s*\n/,
             `## Transcript\n${embedLink}\n`,
           );
         } else {
-          templateBody += `\n## Transcript\n${embedLink}\n`;
+          // Append embed link at end (no heading — the embed is self-explanatory)
+          templateBody += `\n${embedLink}\n`;
         }
       }
     }
@@ -227,28 +247,39 @@ export class TranscriptView {
     const durationStr = formatDuration(durationSeconds);
     const endTimeStr = formatIsoTime(endTime);
 
-    const headerLen = this.headerLength;
     const finalBody = this.completedContent;
+    const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
-      // Insert end_time and duration into YAML frontmatter
-      const updated = content.replace(
-        "tags: [meeting-transcript]\n---",
-        `end_time: "${endTimeStr}"\nduration: "${durationStr}"\ntags: [meeting-transcript]\n---`,
-      );
-      // Find the end of the header (after ## Transcript\n\n)
-      const headerEnd = updated.indexOf("## Transcript\n");
-      const bodyStart = headerEnd >= 0 ? updated.indexOf("\n", headerEnd) + 2 : headerLen;
+      // Insert end_time and duration into YAML frontmatter.
+      // Use closing --- anchor (resilient to Obsidian YAML reformatting).
+      let updated = content;
+      if (content.startsWith("---") && !content.includes("end_time:")) {
+        const closeIdx = content.indexOf("\n---", 3);
+        if (closeIdx >= 0) {
+          updated = content.slice(0, closeIdx) +
+            `\nend_time: "${endTimeStr}"\nduration: "${durationStr}"` +
+            content.slice(closeIdx);
+        }
+      }
+      const bodyStart = findBody(updated);
       return updated.slice(0, bodyStart) + finalBody;
     });
 
-    // Add end_time and duration to notes file frontmatter too
+    // Add end_time and duration to notes file frontmatter too.
+    // Obsidian's Properties editor may reformat YAML (e.g. inline tags
+    // become multi-line), so we find the closing --- directly rather
+    // than matching a specific string.
     if (this.file) {
       await this.app.vault.process(this.file, (content) => {
-        return content.replace(
-          "tags: [meeting-notes]\n---",
-          `end_time: "${endTimeStr}"\nduration: "${durationStr}"\ntags: [meeting-notes]\n---`,
-        );
+        if (!content.startsWith("---")) return content;
+        const closeIdx = content.indexOf("\n---", 3);
+        if (closeIdx < 0) return content;
+        // Skip if already finalized (idempotent)
+        if (content.includes("end_time:")) return content;
+        const before = content.slice(0, closeIdx);
+        const after = content.slice(closeIdx);
+        return before + `\nend_time: "${endTimeStr}"\nduration: "${durationStr}"` + after;
       });
     }
 
@@ -345,13 +376,14 @@ export class TranscriptView {
     this.partial = `\n*${text}*`;
 
     // Snapshot all state for the vault.process closure
-    const headerLen = this.headerLength;
     const completed = this.completedContent;
     const paraTexts = [...this.currentParaTexts];
     const capturedPartial = this.partial;
+    const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
-      const header = content.slice(0, headerLen);
+      const bodyStart = findBody(content);
+      const header = content.slice(0, bodyStart);
       const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
       return header + completed + para + capturedPartial;
     });
@@ -398,12 +430,13 @@ export class TranscriptView {
     this.segmentCount++;
 
     // Snapshot for vault.process
-    const headerLen = this.headerLength;
     const completed = this.completedContent;
     const paraTexts = [...this.currentParaTexts];
+    const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
-      const header = content.slice(0, headerLen);
+      const bodyStart = findBody(content);
+      const header = content.slice(0, bodyStart);
       const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
       return header + completed + para; // No partial
     });
