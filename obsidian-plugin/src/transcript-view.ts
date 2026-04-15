@@ -322,6 +322,19 @@ export class TranscriptView {
   }
 
   /**
+   * Regenerate the notes file content using the current participants,
+   * template override, and meeting type. Call after the modal chain resolves
+   * and before renameForType, so participants and the chosen template land in
+   * the notes file that was initially written with placeholder defaults.
+   */
+  async rebuildNotesContent(meetingType: string): Promise<void> {
+    if (!this.file || !this.transcriptFile || !this.startTime) return;
+    const transcriptBaseName = this.transcriptFile.basename;
+    const content = await this._buildNotesContent(meetingType, this.startTime, transcriptBaseName);
+    await this.app.vault.modify(this.file, content);
+  }
+
+  /**
    * Rename both files to reflect a new meeting type. Updates the embed link
    * and frontmatter in the notes file to match.
    */

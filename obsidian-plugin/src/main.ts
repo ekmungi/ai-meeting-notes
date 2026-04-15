@@ -468,12 +468,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
           await this.saveSettings();
         }
 
-        // Chain: template picker (maybe) -> participants -> renameForType
+        // Chain: template picker (maybe) -> participants -> rebuild + rename
         this._resolveTemplate(selectedType, (templatePath) => {
           this.transcriptView?.setTemplateOverride(templatePath);
-          this._showParticipantsModal((participants) => {
+          this._showParticipantsModal(async (participants) => {
             this.transcriptView?.setParticipants(participants);
-            void this.transcriptView?.renameForType(selectedType);
+            // Rebuild notes file with final participants + template BEFORE rename
+            // so the embed-link fixup in renameForType sees the final content.
+            await this.transcriptView?.rebuildNotesContent(selectedType);
+            await this.transcriptView?.renameForType(selectedType);
           });
         });
       },
