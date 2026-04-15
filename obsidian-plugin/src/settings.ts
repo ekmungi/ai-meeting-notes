@@ -400,8 +400,25 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Meeting Types" });
 
     new Setting(containerEl)
+      .setName("Stakeholders folder")
+      .setDesc("Vault folder containing one .md file per stakeholder. Used for the participants picker. Leave empty to disable.")
+      .addText((text) => {
+        text
+          .setPlaceholder("People")
+          .setValue(this.plugin.settings.stakeholdersFolder)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, stakeholdersFolder: value };
+            await this.plugin.saveSettings();
+          });
+        new FolderSuggest(this.app, text.inputEl, async (path) => {
+          this.plugin.settings = { ...this.plugin.settings, stakeholdersFolder: path };
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
       .setName("Meeting template")
-      .setDesc("Path to an Obsidian note to use as template for new meetings. Leave empty for built-in default. Supports {{meeting_type}}, {{date}}, {{transcript_embed}} variables.")
+      .setDesc("Path to a template file OR a folder of templates. If a folder, you'll be prompted to pick a template when starting a recording (unless a per-type mapping is set below). Supports {{meeting_type}}, {{date}}, {{transcript_embed}}, {{participants}} variables.")
       .addText((text) => {
         text
           .setPlaceholder("Templates/Meeting Template")
@@ -439,7 +456,7 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
 
     new Setting(container)
       .setName("Meeting types")
-      .setDesc("Types available in the quick-switcher when starting a recording.");
+      .setDesc("Types available in the quick-switcher when starting a recording. Assign a template per type when a templates folder is configured.");
 
     let newTypeValue = "";
     new Setting(container)
@@ -474,19 +491,66 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
         })
       );
 
+    // List available template files (only if meetingTemplatePath is a folder)
+    const templateFiles = this._listTemplateFilesForSettings();
+
     for (const meetingType of this.plugin.settings.meetingTypes) {
-      new Setting(container)
-        .setName(meetingType)
-        .addButton((btn) =>
-          btn.setButtonText("Remove").onClick(async () => {
-            this.plugin.settings = {
-              ...this.plugin.settings,
-              meetingTypes: this.plugin.settings.meetingTypes.filter((t) => t !== meetingType),
-            };
+      const row = new Setting(container).setName(meetingType);
+
+      if (templateFiles.length > 0) {
+        row.addDropdown((dd) => {
+          dd.addOption("", "(default)");
+          for (const f of templateFiles) {
+            dd.addOption(f.path, f.basename);
+          }
+          const current = this.plugin.settings.meetingTypeTemplates?.[meetingType] ?? "";
+          dd.setValue(current);
+          dd.onChange(async (value) => {
+            const next = { ...(this.plugin.settings.meetingTypeTemplates ?? {}) };
+            if (value === "") {
+              delete next[meetingType];
+            } else {
+              next[meetingType] = value;
+            }
+            this.plugin.settings = { ...this.plugin.settings, meetingTypeTemplates: next };
             await this.plugin.saveSettings();
-            this._renderMeetingTypesList(container);
-          })
-        );
+          });
+        });
+      }
+
+      row.addButton((btn) =>
+        btn.setButtonText("Remove").onClick(async () => {
+          const nextTemplates = { ...(this.plugin.settings.meetingTypeTemplates ?? {}) };
+          delete nextTemplates[meetingType];
+          this.plugin.settings = {
+            ...this.plugin.settings,
+            meetingTypes: this.plugin.settings.meetingTypes.filter((t) => t !== meetingType),
+            meetingTypeTemplates: nextTemplates,
+          };
+          await this.plugin.saveSettings();
+          this._renderMeetingTypesList(container);
+        })
+      );
     }
+  }
+
+  /**
+   * List `.md` files in the configured meetingTemplatePath if (and only if)
+   * that path resolves to a TFolder. Used to populate the per-type dropdown.
+   * Returns [] when the path is empty, a file, or not found.
+   */
+  private _listTemplateFilesForSettings(): TFile[] {
+    const path = this.plugin.settings.meetingTemplatePath;
+    if (!path) return [];
+    const abs = this.app.vault.getAbstractFileByPath(path);
+    if (!(abs instanceof TFolder)) return [];
+    const out: TFile[] = [];
+    for (const child of abs.children) {
+      if (child instanceof TFile && child.extension === "md") {
+        out.push(child);
+      }
+    }
+    out.sort((a, b) => a.basename.localeCompare(b.basename));
+    return out;
   }
 }
