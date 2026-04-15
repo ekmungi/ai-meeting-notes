@@ -11,12 +11,17 @@
 import {
   Notice,
   Plugin,
+  TFile,
+  TFolder,
   addIcon,
+  normalizePath,
   requestUrl,
 } from "obsidian";
 
 import { MeetingNotesSettingTab } from "./settings";
 import { MeetingTypeModal } from "./meeting-type-modal";
+import { ParticipantsModal } from "./participants-modal";
+import { TemplatePickerModal } from "./template-picker-modal";
 import { ServerLauncher } from "./server-launcher";
 import { TranscriptView } from "./transcript-view";
 import type {
@@ -446,14 +451,14 @@ export default class AIMeetingNotesPlugin extends Plugin {
     this.setState("idle");
   }
 
-  /** Show the meeting type selector. Recording is already active. */
+  /** Show the meeting type selector, then chain into template + participants. */
   private _showMeetingTypeModal(): void {
     const modal = new MeetingTypeModal(
       this.app,
       this.settings.meetingTypes,
       async (selectedType) => {
         if (!selectedType || !this.transcriptView) return;
-        await this.transcriptView.renameForType(selectedType);
+
         // Persist new types added inline
         if (!this.settings.meetingTypes.includes(selectedType)) {
           this.settings = {
@@ -462,9 +467,72 @@ export default class AIMeetingNotesPlugin extends Plugin {
           };
           await this.saveSettings();
         }
+
+        // Chain: template picker (maybe) -> participants -> renameForType
+        this._resolveTemplate(selectedType, (templatePath) => {
+          this.transcriptView?.setTemplateOverride(templatePath);
+          this._showParticipantsModal((participants) => {
+            this.transcriptView?.setParticipants(participants);
+            void this.transcriptView?.renameForType(selectedType);
+          });
+        });
       },
     );
     modal.open();
+  }
+
+  /**
+   * Resolve which template file to use for `meetingType`, optionally prompting
+   * the user with a TemplatePickerModal.
+   *
+   * Order of resolution:
+   *   1. Per-type mapping in `meetingTypeTemplates[meetingType]` -> use directly
+   *   2. `meetingTemplatePath` is a file -> use directly (no picker)
+   *   3. `meetingTemplatePath` is a folder -> open TemplatePickerModal
+   *   4. Otherwise -> null (built-in default)
+   */
+  private _resolveTemplate(
+    meetingType: string,
+    done: (templatePath: string | null) => void,
+  ): void {
+    const mapped = this.settings.meetingTypeTemplates?.[meetingType];
+    if (mapped) {
+      done(mapped);
+      return;
+    }
+    const tplPath = this.settings.meetingTemplatePath;
+    if (!tplPath) {
+      done(null);
+      return;
+    }
+    const abs = this.app.vault.getAbstractFileByPath(normalizePath(tplPath));
+    if (abs instanceof TFile) {
+      done(tplPath);
+      return;
+    }
+    if (abs instanceof TFolder) {
+      new TemplatePickerModal(this.app, tplPath, (chosen) => done(chosen)).open();
+      return;
+    }
+    done(null);
+  }
+
+  /**
+   * Open the participants multi-select modal if a stakeholders folder is
+   * configured; otherwise call `done([])` immediately.
+   */
+  private _showParticipantsModal(done: (participants: string[]) => void): void {
+    const folderPath = this.settings.stakeholdersFolder;
+    if (!folderPath) {
+      done([]);
+      return;
+    }
+    const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
+    if (!(folder instanceof TFolder)) {
+      done([]);
+      return;
+    }
+    new ParticipantsModal(this.app, folderPath, done).open();
   }
 
   // --- Silence alerts ---
