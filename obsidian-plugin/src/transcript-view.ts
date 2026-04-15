@@ -56,6 +56,8 @@ export class TranscriptView {
   private partial = "";
   private segmentCount = 0;
   private lastSpeaker: string | null = null;
+  private participants: string[] = [];
+  private templateOverride: string | null = null;
 
   constructor(app: App, settings: MeetingNotesSettings) {
     this.app = app;
@@ -145,10 +147,10 @@ export class TranscriptView {
    * Build the notes file content.
    *
    * Plugin always generates the YAML frontmatter (type, date, start_time,
-   * transcript_file, tags). If a user template is set, any YAML it contains
-   * is stripped and its custom fields are merged into the plugin's block.
-   * The template body (everything after YAML) provides the markdown sections.
-   * If no template is set, a built-in default body is used.
+   * transcript_file, participants). If a user template is set, any YAML it
+   * contains is stripped and its custom fields are merged into the plugin's
+   * block. The template body (everything after YAML) provides the markdown
+   * sections. If no template is set, a built-in default body is used.
    */
   private async _buildNotesContent(
     typeName: string,
@@ -158,11 +160,13 @@ export class TranscriptView {
     const dateStr = formatIsoDate(startTime);
     const embedLink = `![[${transcriptBaseName}]]`;
 
+    // Resolve template path: override > settings > none
+    const templatePath = this.templateOverride || this.settings.meetingTemplatePath;
+
     // Extract body and custom YAML from user template (if any)
     let templateBody = "";
     let customYaml: Record<string, string> = {};
 
-    const templatePath = this.settings.meetingTemplatePath;
     if (templatePath) {
       const normalizedPath = normalizePath(templatePath);
       const templateFile = this.app.vault.getAbstractFileByPath(normalizedPath);
@@ -175,32 +179,38 @@ export class TranscriptView {
         templateBody = parsed.body
           .replace(/\{\{meeting_type\}\}/g, typeName)
           .replace(/\{\{date\}\}/g, dateStr)
-          .replace(/\{\{transcript_embed\}\}/g, embedLink);
+          .replace(/\{\{transcript_embed\}\}/g, embedLink)
+          .replace(/\{\{participants\}\}/g, this._renderParticipantsBlock());
       }
     }
 
-    // Use default body if no template or template file not found
     if (!templateBody) {
       templateBody = defaultNotesBody(embedLink);
     } else {
-      // Ensure transcript embed is present somewhere in the body
       if (!templateBody.includes(embedLink)) {
         if (templateBody.includes("## Transcript")) {
-          // Replace heading + embed (keep heading if user explicitly has it)
           templateBody = templateBody.replace(
             /## Transcript\s*\n/,
             `## Transcript\n${embedLink}\n`,
           );
         } else {
-          // Append embed link at end (no heading — the embed is self-explanatory)
           templateBody += `\n${embedLink}\n`;
         }
       }
     }
 
-    // Assemble: plugin YAML + custom fields + body
-    const yaml = buildNotesYaml(startTime, transcriptBaseName, typeName, customYaml);
+    const yaml = buildNotesYaml(startTime, transcriptBaseName, this.participants, customYaml);
     return yaml + "\n" + templateBody;
+  }
+
+  /**
+   * Render the participants array as indented YAML list items for
+   * `{{participants}}` substitution inside user templates. Empty array
+   * yields empty string (the template line collapses).
+   */
+  private _renderParticipantsBlock(): string {
+    if (this.participants.length === 0) return "";
+    return this.participants.map((n) => `  - "[[${n}]]"`).join("\n");
   }
 
   /** Add audio file reference to the notes file frontmatter. */
@@ -301,6 +311,16 @@ export class TranscriptView {
     }
   }
 
+  /** Called from main.ts after the participants modal resolves. */
+  setParticipants(participants: string[]): void {
+    this.participants = participants;
+  }
+
+  /** Called from main.ts after the template picker modal resolves. */
+  setTemplateOverride(path: string | null): void {
+    this.templateOverride = path;
+  }
+
   /**
    * Rename both files to reflect a new meeting type. Updates the embed link
    * and frontmatter in the notes file to match.
@@ -334,12 +354,11 @@ export class TranscriptView {
       );
     });
 
-    // Update embed link, transcript_file, and frontmatter type in notes file
+    // Update embed link and transcript_file in notes file
     await this.app.vault.process(this.file, (content) => {
       return content
         .replace(`![[${oldTranscriptBaseName}]]`, `![[${newTranscriptBaseName}]]`)
-        .replace(/^transcript_file:\s*".*"$/m, `transcript_file: "[[${newTranscriptBaseName}]]"`)
-        .replace(/^type:\s*".*"$/m, `type: "${meetingType}"`);
+        .replace(/^transcript_file:\s*".*"$/m, `transcript_file: "[[${newTranscriptBaseName}]]"`);
     });
 
     // Rename notes file
