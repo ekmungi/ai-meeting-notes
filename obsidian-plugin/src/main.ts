@@ -19,7 +19,7 @@ import {
 } from "obsidian";
 
 import { MeetingNotesSettingTab } from "./settings";
-import { MeetingTypeModal } from "./meeting-type-modal";
+import { MeetingTypeModal, type ModalResult } from "./meeting-type-modal";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
 import { ServerLauncher } from "./server-launcher";
@@ -456,8 +456,22 @@ export default class AIMeetingNotesPlugin extends Plugin {
     const modal = new MeetingTypeModal(
       this.app,
       this.settings.meetingTypes,
-      async (selectedType) => {
-        if (!selectedType || !this.transcriptView) return;
+      this.settings.meetingPresets,
+      async (result) => {
+        if (!result || !this.transcriptView) return;
+
+        if (result.kind === "preset") {
+          // Preset: skip template picker and participants modal entirely
+          const { preset } = result;
+          this.transcriptView.setTemplateOverride(preset.templatePath || null);
+          this.transcriptView.setParticipants(preset.participants);
+          await this.transcriptView.rebuildNotesContent(preset.meetingType);
+          await this.transcriptView.renameForType(preset.meetingType);
+          return;
+        }
+
+        // Base type: existing chain
+        const selectedType = result.value;
 
         // Persist new types added inline
         if (!this.settings.meetingTypes.includes(selectedType)) {
