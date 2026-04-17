@@ -425,7 +425,7 @@ function registerIpcHandlers(): void {
         currentTranscriptPath = path.join(outputDir, `${baseName}_transcript.md`);
 
         const transcriptBaseName = `${baseName}_transcript`;
-        const yaml = buildNotesYaml(now, transcriptBaseName, meetingType);
+        const yaml = buildNotesYaml(now, transcriptBaseName, []);
         const body = defaultNotesBody();
         fs.writeFileSync(currentNotesPath, yaml + body);
         initTranscriptFile(currentTranscriptPath, now);
