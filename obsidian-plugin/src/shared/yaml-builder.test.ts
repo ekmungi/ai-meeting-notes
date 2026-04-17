@@ -21,21 +21,21 @@ describe("buildNotesYaml", () => {
     expect(yaml).not.toContain("tags:");
   });
 
-  it("emits participants list with wiki-link items when provided", () => {
+  it("emits attendees list with wiki-link items when provided", () => {
     const yaml = buildNotesYaml(fixedDate, "TR", ["Alice", "Bob"]);
-    expect(yaml).toContain("participants:");
+    expect(yaml).toContain("attendees:");
     expect(yaml).toContain('  - "[[Alice]]"');
     expect(yaml).toContain('  - "[[Bob]]"');
   });
 
-  it("omits participants key entirely when empty", () => {
+  it("omits attendees key entirely when empty", () => {
     const yaml = buildNotesYaml(fixedDate, "TR", []);
-    expect(yaml).not.toContain("participants:");
+    expect(yaml).not.toContain("attendees:");
   });
 
-  it("includes transcript_file wikilink", () => {
+  it("includes transcript-file wikilink", () => {
     const yaml = buildNotesYaml(fixedDate, "TR", []);
-    expect(yaml).toContain('transcript_file: "[[TR]]"');
+    expect(yaml).toContain('transcript-file: "[[TR]]"');
   });
 
   it("merges customYaml after plugin fields", () => {
@@ -53,15 +53,20 @@ describe("buildTranscriptYaml", () => {
 
   it("links back to notes file", () => {
     const yaml = buildTranscriptYaml(fixedDate, "NT");
-    expect(yaml).toContain('notes_file: "[[NT]]"');
+    expect(yaml).toContain('notes-file: "[[NT]]"');
   });
 });
 
 describe("PLUGIN_YAML_KEYS", () => {
-  it("reserves type, participants; does not reserve tags", () => {
+  it("reserves type, attendees; does not reserve tags", () => {
     expect(PLUGIN_YAML_KEYS.has("type")).toBe(true);
-    expect(PLUGIN_YAML_KEYS.has("participants")).toBe(true);
+    expect(PLUGIN_YAML_KEYS.has("attendees")).toBe(true);
     expect(PLUGIN_YAML_KEYS.has("tags")).toBe(false);
+    expect(PLUGIN_YAML_KEYS.has("start-time")).toBe(true);
+    expect(PLUGIN_YAML_KEYS.has("end-time")).toBe(true);
+    expect(PLUGIN_YAML_KEYS.has("duration-mins")).toBe(true);
+    expect(PLUGIN_YAML_KEYS.has("transcript-file")).toBe(true);
+    expect(PLUGIN_YAML_KEYS.has("notes-file")).toBe(true);
   });
 });
 

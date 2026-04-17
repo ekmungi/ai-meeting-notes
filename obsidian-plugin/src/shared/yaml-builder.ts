@@ -12,8 +12,8 @@ export function buildTranscriptYaml(startTime: Date, notesBaseName: string): str
     "---",
     "type: [meeting-transcript]",
     `date: ${formatIsoDate(startTime)}`,
-    `start_time: "${formatIsoTime(startTime)}"`,
-    `notes_file: "[[${notesBaseName}]]"`,
+    `start-time: "${formatIsoTime(startTime)}"`,
+    `notes-file: "[[${notesBaseName}]]"`,
     "---",
     "",
     "## Transcript",
@@ -40,11 +40,11 @@ export function buildNotesYaml(
     "---",
     "type: [meeting]",
     `date: ${formatIsoDate(startTime)}`,
-    `start_time: "${formatIsoTime(startTime)}"`,
-    ...(transcriptBaseName ? [`transcript_file: "[[${transcriptBaseName}]]"`] : []),
+    `start-time: "${formatIsoTime(startTime)}"`,
+    ...(transcriptBaseName ? [`transcript-file: "[[${transcriptBaseName}]]"`] : []),
   ];
   if (participants.length > 0) {
-    lines.push("participants:");
+    lines.push("attendees:");
     for (const name of participants) {
       lines.push(`  - "[[${name}]]"`);
     }
@@ -109,5 +109,6 @@ export function parseTemplateContent(
 
 /** Plugin-owned YAML keys that cannot be overridden by user templates. */
 export const PLUGIN_YAML_KEYS = new Set([
-  "type", "date", "start_time", "transcript_file", "notes_file", "participants",
+  "type", "date", "start-time", "end-time", "duration-mins",
+  "transcript-file", "notes-file", "attendees",
 ]);
