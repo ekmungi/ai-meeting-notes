@@ -15,10 +15,19 @@ export class ParticipantsModal extends Modal {
   private listEl: HTMLElement | null = null;
   private searchQuery = "";
 
-  constructor(app: App, folderPath: string, onChoose: (selected: string[]) => void) {
+  /**
+   * @param app         Obsidian app reference.
+   * @param folderPath  Vault path to the contacts/stakeholders folder.
+   * @param onChoose    Callback with selected basenames.
+   * @param preSelected Optional basenames to pre-check on open.
+   */
+  constructor(app: App, folderPath: string, onChoose: (selected: string[]) => void, preSelected?: string[]) {
     super(app);
     this.folderPath = folderPath;
     this.onChoose = onChoose;
+    if (preSelected) {
+      for (const name of preSelected) this.selected.add(name);
+    }
   }
 
   onOpen(): void {
