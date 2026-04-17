@@ -22,7 +22,7 @@
 
 import { type App, TFile, TFolder, normalizePath } from "obsidian";
 import type { MeetingNotesSettings, TranscriptMessage } from "./types";
-import { formatFileTimestamp, sanitizeFilename, formatIsoDate, formatIsoTime, formatDuration } from "./shared/format-utils";
+import { formatFileTimestamp, sanitizeFilename, formatIsoDate, formatIsoTime } from "./shared/format-utils";
 import { buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
 import { extractTranscriptBody, mergeTranscriptIntoNotes } from "./shared/merge-logic";
 
@@ -103,6 +103,9 @@ export class TranscriptView {
     this.partial = "";
     this.segmentCount = 0;
     this.lastSpeaker = null;
+    // Reset per-session state so a previous recording's choices don't leak
+    this.participants = [];
+    this.templateOverride = null;
 
     const notesFolder = this.settings.outputFolder || "Meetings";
     // Transcript folder falls back to notes folder if empty
@@ -254,7 +257,6 @@ export class TranscriptView {
     }
 
     const endTime = new Date();
-    const durationStr = formatDuration(durationSeconds);
     const endTimeStr = formatIsoTime(endTime);
 
     const finalBody = this.completedContent;
@@ -264,11 +266,11 @@ export class TranscriptView {
       // Insert end_time and duration into YAML frontmatter.
       // Use closing --- anchor (resilient to Obsidian YAML reformatting).
       let updated = content;
-      if (content.startsWith("---") && !content.includes("end_time:")) {
+      if (content.startsWith("---") && !content.includes("end-time:")) {
         const closeIdx = content.indexOf("\n---", 3);
         if (closeIdx >= 0) {
           updated = content.slice(0, closeIdx) +
-            `\nend_time: "${endTimeStr}"\nduration: "${durationStr}"` +
+            `\nend-time: "${endTimeStr}"\nduration-mins: ${Math.round(durationSeconds / 60)}` +
             content.slice(closeIdx);
         }
       }
@@ -286,10 +288,10 @@ export class TranscriptView {
         const closeIdx = content.indexOf("\n---", 3);
         if (closeIdx < 0) return content;
         // Skip if already finalized (idempotent)
-        if (content.includes("end_time:")) return content;
+        if (content.includes("end-time:")) return content;
         const before = content.slice(0, closeIdx);
         const after = content.slice(closeIdx);
-        return before + `\nend_time: "${endTimeStr}"\nduration: "${durationStr}"` + after;
+        return before + `\nend-time: "${endTimeStr}"\nduration-mins: ${Math.round(durationSeconds / 60)}` + after;
       });
     }
 
@@ -322,16 +324,40 @@ export class TranscriptView {
   }
 
   /**
-   * Regenerate the notes file content using the current participants,
-   * template override, and meeting type. Call after the modal chain resolves
-   * and before renameForType, so participants and the chosen template land in
-   * the notes file that was initially written with placeholder defaults.
+   * Update only the YAML frontmatter of the notes file to reflect the current
+   * participants and template's custom YAML fields. The body is preserved as-is
+   * so any Templater (`<% ... %>`) processing that ran after the initial
+   * createNote() is not undone.
    */
-  async rebuildNotesContent(meetingType: string): Promise<void> {
+  async rebuildNotesContent(_meetingType: string): Promise<void> {
     if (!this.file || !this.transcriptFile || !this.startTime) return;
     const transcriptBaseName = this.transcriptFile.basename;
-    const content = await this._buildNotesContent(meetingType, this.startTime, transcriptBaseName);
-    await this.app.vault.modify(this.file, content);
+
+    // Re-resolve custom YAML fields from the (possibly overridden) template.
+    const templatePath = this.templateOverride || this.settings.meetingTemplatePath;
+    let customYaml: Record<string, string> = {};
+    if (templatePath) {
+      const templateFile = this.app.vault.getAbstractFileByPath(normalizePath(templatePath));
+      if (templateFile instanceof TFile) {
+        const raw = await this.app.vault.read(templateFile);
+        customYaml = parseTemplateContent(raw, PLUGIN_YAML_KEYS).customFields;
+      }
+    }
+
+    const newYaml = buildNotesYaml(this.startTime, transcriptBaseName, this.participants, customYaml);
+
+    // Splice the new YAML block into the existing file, preserving the body.
+    // Match the first frontmatter block (opening --- on line 1 through the
+    // next --- on its own line). Anything after belongs to the body.
+    await this.app.vault.process(this.file, (content) => {
+      const fmMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
+      if (fmMatch) {
+        const body = content.slice(fmMatch[0].length);
+        return body.startsWith("\n") ? newYaml + body : newYaml + "\n" + body;
+      }
+      // No existing frontmatter detected — prepend a fresh one.
+      return newYaml + "\n" + content;
+    });
   }
 
   /**
@@ -362,8 +388,8 @@ export class TranscriptView {
     // Update transcript backlink to new notes file
     await this.app.vault.process(this.transcriptFile, (content) => {
       return content.replace(
-        /^notes_file:\s*".*"$/m,
-        `notes_file: "[[${newBaseName}]]"`,
+        /^notes-file:\s*".*"$/m,
+        `notes-file: "[[${newBaseName}]]"`,
       );
     });
 
@@ -371,7 +397,7 @@ export class TranscriptView {
     await this.app.vault.process(this.file, (content) => {
       return content
         .replace(`![[${oldTranscriptBaseName}]]`, `![[${newTranscriptBaseName}]]`)
-        .replace(/^transcript_file:\s*".*"$/m, `transcript_file: "[[${newTranscriptBaseName}]]"`);
+        .replace(/^transcript-file:\s*".*"$/m, `transcript-file: "[[${newTranscriptBaseName}]]"`);
     });
 
     // Rename notes file
