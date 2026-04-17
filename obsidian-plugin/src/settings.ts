@@ -6,7 +6,7 @@
 import { App, PluginSettingTab, Setting, TextComponent, TFile, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
 import { isEncryptionAvailable } from "./crypto";
-import { FolderSuggest, FileSuggest, FileOrFolderSuggest } from "./suggest-utils";
+import { FolderSuggest, FileOrFolderSuggest } from "./suggest-utils";
 
 export class MeetingNotesSettingTab extends PluginSettingTab {
   plugin: AIMeetingNotesPlugin;
@@ -513,17 +513,71 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
         })
       );
 
-    // Render each preset as a bordered card
+    // Shared data for all presets
+    const templateFiles = this._listTemplateFilesForSettings();
+    const tplPath = this.plugin.settings.meetingTemplatePath;
+    const tplAbs = tplPath ? this.app.vault.getAbstractFileByPath(tplPath) : null;
+    const folderPrefix = tplPath ? tplPath.replace(/\/+$/, "") + "/" : "";
+    const contactFiles = this._listContactFiles();
+
+    // Render each preset as a collapsible card
     for (let i = 0; i < this.plugin.settings.meetingPresets.length; i++) {
       const preset = this.plugin.settings.meetingPresets[i];
       const presetEl = container.createDiv({ cls: "mn-preset-item" });
       presetEl.style.border = "1px solid var(--background-modifier-border)";
       presetEl.style.borderRadius = "8px";
-      presetEl.style.padding = "0.75em";
       presetEl.style.marginBottom = "0.5em";
+      presetEl.style.overflow = "hidden";
+
+      // Collapsible header — shows preset name, click to expand/collapse
+      const headerEl = presetEl.createDiv({ cls: "mn-preset-header" });
+      headerEl.style.display = "flex";
+      headerEl.style.alignItems = "center";
+      headerEl.style.justifyContent = "space-between";
+      headerEl.style.padding = "0.5em 0.75em";
+      headerEl.style.cursor = "pointer";
+      headerEl.style.userSelect = "none";
+
+      const arrowEl = headerEl.createSpan({ cls: "mn-preset-arrow" });
+      arrowEl.style.marginRight = "0.5em";
+      arrowEl.style.transition = "transform 0.15s";
+      arrowEl.textContent = "\u25B6"; // right-pointing triangle
+
+      const titleEl = headerEl.createSpan({ text: preset.name || "Unnamed Preset" });
+      titleEl.style.flex = "1";
+      titleEl.style.fontWeight = "500";
+
+      // Summary: show participants count + template name
+      const summaryParts: string[] = [];
+      if (preset.participants.length > 0) {
+        summaryParts.push(`${preset.participants.length} participant${preset.participants.length > 1 ? "s" : ""}`);
+      }
+      if (preset.templatePath) {
+        const tName = preset.templatePath.split("/").pop()?.replace(".md", "") || "";
+        if (tName) summaryParts.push(tName);
+      }
+      if (summaryParts.length > 0) {
+        const summaryEl = headerEl.createSpan({ text: summaryParts.join(" | ") });
+        summaryEl.style.fontSize = "0.8em";
+        summaryEl.style.opacity = "0.6";
+        summaryEl.style.marginLeft = "0.5em";
+      }
+
+      // Collapsible body
+      const bodyEl = presetEl.createDiv({ cls: "mn-preset-body" });
+      bodyEl.style.padding = "0 0.75em 0.75em";
+      bodyEl.style.display = "none"; // collapsed by default
+
+      headerEl.addEventListener("click", () => {
+        const isOpen = bodyEl.style.display !== "none";
+        bodyEl.style.display = isOpen ? "none" : "block";
+        arrowEl.style.transform = isOpen ? "" : "rotate(90deg)";
+      });
+
+      // --- Body contents ---
 
       // Preset name
-      new Setting(presetEl)
+      new Setting(bodyEl)
         .setName("Name")
         .addText((text) => {
           text.setValue(preset.name)
@@ -533,11 +587,13 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
               updated[i] = { ...updated[i], name: value };
               this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
               await this.plugin.saveSettings();
+              // Update header title live
+              titleEl.textContent = value || "Unnamed Preset";
             });
         });
 
-      // Meeting type dropdown sourced from configured types
-      new Setting(presetEl)
+      // Meeting type dropdown
+      new Setting(bodyEl)
         .setName("Meeting type")
         .addDropdown((dd) => {
           for (const t of this.plugin.settings.meetingTypes) {
@@ -552,15 +608,9 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           });
         });
 
-      // Template — dropdown from meetingTemplatePath folder, or single file
-      const templateFiles = this._listTemplateFilesForSettings();
-      const tplPath = this.plugin.settings.meetingTemplatePath;
-      const tplAbs = tplPath ? this.app.vault.getAbstractFileByPath(tplPath) : null;
-
+      // Template — dropdown from configured template folder only
       if (templateFiles.length > 0) {
-        // Folder mode: dropdown of files in that folder
-        const folderPrefix = (tplPath ? tplPath.replace(/\/+$/, "") + "/" : "");
-        new Setting(presetEl)
+        new Setting(bodyEl)
           .setName("Template")
           .addDropdown((dd) => {
             dd.addOption("", "(default)");
@@ -585,12 +635,10 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           void this.plugin.saveSettings();
         }
       } else if (tplAbs instanceof TFile) {
-        // Single file mode: show as read-only
-        new Setting(presetEl)
+        new Setting(bodyEl)
           .setName("Template")
           .setDesc(tplPath)
           .addButton((btn) => btn.setButtonText("Using default template").setDisabled(true));
-        // Auto-set templatePath
         if (preset.templatePath !== tplPath) {
           const updated = [...this.plugin.settings.meetingPresets];
           updated[i] = { ...updated[i], templatePath: tplPath };
@@ -598,36 +646,16 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           void this.plugin.saveSettings();
         }
       } else {
-        // No template configured — show FileSuggest fallback
-        new Setting(presetEl)
+        new Setting(bodyEl)
           .setName("Template")
-          .addText((text) => {
-            text.setValue(preset.templatePath)
-              .setPlaceholder("Templates/Meeting.md")
-              .onChange(async (value) => {
-                const updated = [...this.plugin.settings.meetingPresets];
-                updated[i] = { ...updated[i], templatePath: value };
-                this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
-                await this.plugin.saveSettings();
-              });
-            new FileSuggest(this.app, text.inputEl, async (path) => {
-              const updated = [...this.plugin.settings.meetingPresets];
-              updated[i] = { ...updated[i], templatePath: path };
-              this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
-              await this.plugin.saveSettings();
-              text.setValue(path);
-            });
-          });
+          .setDesc("Configure a templates folder or file in the Meeting Types section above.");
       }
 
-      // Participants — multi-select from contacts folder
-      const contactFiles = this._listContactFiles();
-      const participantsSetting = new Setting(presetEl)
-        .setName("Participants");
+      // Participants — multi-select tags + add dropdown from contacts folder
+      const participantsSetting = new Setting(bodyEl).setName("Participants");
 
       if (contactFiles.length > 0) {
-        // Show current selections as removable tags + add dropdown
-        const tagsEl = presetEl.createDiv({ cls: "mn-participant-tags" });
+        const tagsEl = bodyEl.createDiv({ cls: "mn-participant-tags" });
         tagsEl.style.display = "flex";
         tagsEl.style.flexWrap = "wrap";
         tagsEl.style.gap = "4px";
@@ -654,7 +682,6 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           });
         }
 
-        // Add dropdown for contacts not yet selected
         const available = contactFiles.filter((f) => !preset.participants.includes(f.basename));
         if (available.length > 0) {
           participantsSetting.addDropdown((dd) => {
@@ -676,8 +703,8 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
         participantsSetting.setDesc("Configure a contacts folder above to select participants.");
       }
 
-      // Remove button — filters out this preset by index
-      new Setting(presetEl)
+      // Remove button
+      new Setting(bodyEl)
         .addButton((btn) =>
           btn.setButtonText("Remove preset").setWarning().onClick(async () => {
             const updated = this.plugin.settings.meetingPresets.filter((_, idx) => idx !== i);
