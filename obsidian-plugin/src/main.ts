@@ -19,7 +19,7 @@ import {
 } from "obsidian";
 
 import { MeetingNotesSettingTab } from "./settings";
-import { MeetingTypeModal, type ModalResult } from "./meeting-type-modal";
+import { MeetingTypeModal } from "./meeting-type-modal";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
 import { ServerLauncher } from "./server-launcher";
