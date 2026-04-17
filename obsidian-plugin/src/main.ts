@@ -465,8 +465,8 @@ export default class AIMeetingNotesPlugin extends Plugin {
           const { preset } = result;
           this.transcriptView.setTemplateOverride(preset.templatePath || null);
           this.transcriptView.setParticipants(preset.participants);
-          await this.transcriptView.rebuildNotesContent(preset.meetingType);
-          await this.transcriptView.renameForType(preset.meetingType);
+          await this.transcriptView.rebuildNotesContent(preset.name);
+          await this.transcriptView.renameForType(preset.name);
           return;
         }
 
