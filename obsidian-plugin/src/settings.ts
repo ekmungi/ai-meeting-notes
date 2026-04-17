@@ -512,6 +512,8 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             meetingPresets: [...this.plugin.settings.meetingPresets, newPreset],
           };
           await this.plugin.saveSettings();
+          // Auto-expand the newly added preset
+          this.expandedPresetIndex = this.plugin.settings.meetingPresets.length - 1;
           this._renderPresetsList(container);
         })
       );
