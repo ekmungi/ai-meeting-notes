@@ -45,6 +45,44 @@ export class FolderSuggest extends AbstractInputSuggest<TFolder> {
 }
 
 /**
+ * Autocomplete suggest for vault files AND folders.
+ * Shows both .md files and folders so users can pick either.
+ */
+export class FileOrFolderSuggest extends AbstractInputSuggest<TFile | TFolder> {
+  private onSelectCallback: (path: string) => void;
+
+  constructor(app: App, inputEl: HTMLInputElement, onSelect: (path: string) => void) {
+    super(app, inputEl);
+    this.onSelectCallback = onSelect;
+  }
+
+  getSuggestions(query: string): (TFile | TFolder)[] {
+    const lower = query.toLowerCase();
+    const all = this.app.vault.getAllLoadedFiles();
+    const folders = all
+      .filter((f): f is TFolder => f instanceof TFolder && f.path !== "/" && f.path.toLowerCase().includes(lower));
+    const files = all
+      .filter((f): f is TFile => f instanceof TFile && f.extension === "md" && f.path.toLowerCase().includes(lower));
+    return [...folders, ...files].sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  renderSuggestion(item: TFile | TFolder, el: HTMLElement): void {
+    if (item instanceof TFolder) {
+      el.setText(`${item.path}/`);
+      el.style.fontWeight = "bold";
+    } else {
+      el.setText(item.path);
+    }
+  }
+
+  selectSuggestion(item: TFile | TFolder, _evt: MouseEvent | KeyboardEvent): void {
+    this.setValue(item.path);
+    this.onSelectCallback(item.path);
+    this.close();
+  }
+}
+
+/**
  * Autocomplete suggest for vault markdown files.
  * Filters .md files as the user types.
  */

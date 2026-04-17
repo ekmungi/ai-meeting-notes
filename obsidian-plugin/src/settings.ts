@@ -6,7 +6,7 @@
 import { App, PluginSettingTab, Setting, TextComponent, TFile, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
 import { isEncryptionAvailable } from "./crypto";
-import { FolderSuggest, FileSuggest } from "./suggest-utils";
+import { FolderSuggest, FileSuggest, FileOrFolderSuggest } from "./suggest-utils";
 
 export class MeetingNotesSettingTab extends PluginSettingTab {
   plugin: AIMeetingNotesPlugin;
@@ -340,8 +340,8 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Meeting Types" });
 
     new Setting(containerEl)
-      .setName("Stakeholders folder")
-      .setDesc("Vault folder containing one .md file per stakeholder. Used for the participants picker. Leave empty to disable.")
+      .setName("Contacts folder")
+      .setDesc("Vault folder containing one .md file per contact/stakeholder. Used for the participants picker. Leave empty to disable.")
       .addText((text) => {
         text
           .setPlaceholder("People")
@@ -367,7 +367,7 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             this.plugin.settings = { ...this.plugin.settings, meetingTemplatePath: value };
             await this.plugin.saveSettings();
           });
-        new FileSuggest(this.app, text.inputEl, async (path) => {
+        new FileOrFolderSuggest(this.app, text.inputEl, async (path) => {
           this.plugin.settings = { ...this.plugin.settings, meetingTemplatePath: path };
           await this.plugin.saveSettings();
         });
@@ -552,42 +552,129 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           });
         });
 
-      // Template path with FileSuggest autocomplete
-      new Setting(presetEl)
-        .setName("Template")
-        .addText((text) => {
-          text.setValue(preset.templatePath)
-            .setPlaceholder("Templates/Meeting.md")
-            .onChange(async (value) => {
+      // Template — dropdown from meetingTemplatePath folder, or single file
+      const templateFiles = this._listTemplateFilesForSettings();
+      const tplPath = this.plugin.settings.meetingTemplatePath;
+      const tplAbs = tplPath ? this.app.vault.getAbstractFileByPath(tplPath) : null;
+
+      if (templateFiles.length > 0) {
+        // Folder mode: dropdown of files in that folder
+        const folderPrefix = (tplPath ? tplPath.replace(/\/+$/, "") + "/" : "");
+        new Setting(presetEl)
+          .setName("Template")
+          .addDropdown((dd) => {
+            dd.addOption("", "(default)");
+            for (const f of templateFiles) {
+              const rel = folderPrefix && f.path.startsWith(folderPrefix)
+                ? f.path.slice(folderPrefix.length) : f.path;
+              dd.addOption(f.path, rel.endsWith(".md") ? rel.slice(0, -3) : rel);
+            }
+            dd.setValue(preset.templatePath);
+            dd.onChange(async (value) => {
               const updated = [...this.plugin.settings.meetingPresets];
               updated[i] = { ...updated[i], templatePath: value };
               this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
               await this.plugin.saveSettings();
             });
-          new FileSuggest(this.app, text.inputEl, async (path) => {
-            const updated = [...this.plugin.settings.meetingPresets];
-            updated[i] = { ...updated[i], templatePath: path };
-            this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
-            await this.plugin.saveSettings();
-            text.setValue(path);
           });
-        });
-
-      // Participants as comma-separated names
-      new Setting(presetEl)
-        .setName("Participants")
-        .setDesc("Comma-separated stakeholder names (basenames from your stakeholders folder)")
-        .addText((text) => {
-          text.setValue(preset.participants.join(", "))
-            .setPlaceholder("Alice, Bob, Charlie")
-            .onChange(async (value) => {
-              const names = value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+        // Auto-select if only one template
+        if (templateFiles.length === 1 && !preset.templatePath) {
+          const updated = [...this.plugin.settings.meetingPresets];
+          updated[i] = { ...updated[i], templatePath: templateFiles[0].path };
+          this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
+          void this.plugin.saveSettings();
+        }
+      } else if (tplAbs instanceof TFile) {
+        // Single file mode: show as read-only
+        new Setting(presetEl)
+          .setName("Template")
+          .setDesc(tplPath)
+          .addButton((btn) => btn.setButtonText("Using default template").setDisabled(true));
+        // Auto-set templatePath
+        if (preset.templatePath !== tplPath) {
+          const updated = [...this.plugin.settings.meetingPresets];
+          updated[i] = { ...updated[i], templatePath: tplPath };
+          this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
+          void this.plugin.saveSettings();
+        }
+      } else {
+        // No template configured — show FileSuggest fallback
+        new Setting(presetEl)
+          .setName("Template")
+          .addText((text) => {
+            text.setValue(preset.templatePath)
+              .setPlaceholder("Templates/Meeting.md")
+              .onChange(async (value) => {
+                const updated = [...this.plugin.settings.meetingPresets];
+                updated[i] = { ...updated[i], templatePath: value };
+                this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
+                await this.plugin.saveSettings();
+              });
+            new FileSuggest(this.app, text.inputEl, async (path) => {
               const updated = [...this.plugin.settings.meetingPresets];
-              updated[i] = { ...updated[i], participants: names };
+              updated[i] = { ...updated[i], templatePath: path };
               this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
               await this.plugin.saveSettings();
+              text.setValue(path);
             });
-        });
+          });
+      }
+
+      // Participants — multi-select from contacts folder
+      const contactFiles = this._listContactFiles();
+      const participantsSetting = new Setting(presetEl)
+        .setName("Participants");
+
+      if (contactFiles.length > 0) {
+        // Show current selections as removable tags + add dropdown
+        const tagsEl = presetEl.createDiv({ cls: "mn-participant-tags" });
+        tagsEl.style.display = "flex";
+        tagsEl.style.flexWrap = "wrap";
+        tagsEl.style.gap = "4px";
+        tagsEl.style.marginBottom = "0.5em";
+
+        for (const name of preset.participants) {
+          const tag = tagsEl.createEl("span", { text: name, cls: "mn-participant-tag" });
+          tag.style.background = "var(--background-modifier-hover)";
+          tag.style.padding = "2px 8px";
+          tag.style.borderRadius = "12px";
+          tag.style.fontSize = "0.85em";
+          tag.style.display = "inline-flex";
+          tag.style.alignItems = "center";
+          tag.style.gap = "4px";
+          const removeBtn = tag.createEl("span", { text: "\u00d7" });
+          removeBtn.style.cursor = "pointer";
+          removeBtn.style.fontWeight = "bold";
+          removeBtn.addEventListener("click", async () => {
+            const updated = [...this.plugin.settings.meetingPresets];
+            updated[i] = { ...updated[i], participants: preset.participants.filter((p) => p !== name) };
+            this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
+            await this.plugin.saveSettings();
+            this._renderPresetsList(container);
+          });
+        }
+
+        // Add dropdown for contacts not yet selected
+        const available = contactFiles.filter((f) => !preset.participants.includes(f.basename));
+        if (available.length > 0) {
+          participantsSetting.addDropdown((dd) => {
+            dd.addOption("", "+ Add participant...");
+            for (const f of available) {
+              dd.addOption(f.basename, f.basename);
+            }
+            dd.onChange(async (value) => {
+              if (!value) return;
+              const updated = [...this.plugin.settings.meetingPresets];
+              updated[i] = { ...updated[i], participants: [...preset.participants, value] };
+              this.plugin.settings = { ...this.plugin.settings, meetingPresets: updated };
+              await this.plugin.saveSettings();
+              this._renderPresetsList(container);
+            });
+          });
+        }
+      } else {
+        participantsSetting.setDesc("Configure a contacts folder above to select participants.");
+      }
 
       // Remove button — filters out this preset by index
       new Setting(presetEl)
@@ -621,6 +708,27 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
     };
     walk(abs);
     out.sort((a, b) => a.path.localeCompare(b.path));
+    return out;
+  }
+
+  /**
+   * List `.md` files in the configured stakeholdersFolder (contacts folder).
+   * Recursively walks subfolders. Returns [] when the folder is empty or not set.
+   */
+  private _listContactFiles(): TFile[] {
+    const path = this.plugin.settings.stakeholdersFolder;
+    if (!path) return [];
+    const abs = this.app.vault.getAbstractFileByPath(path);
+    if (!(abs instanceof TFolder)) return [];
+    const out: TFile[] = [];
+    const walk = (node: TFolder): void => {
+      for (const child of node.children) {
+        if (child instanceof TFolder) walk(child);
+        else if (child instanceof TFile && child.extension === "md") out.push(child);
+      }
+    };
+    walk(abs);
+    out.sort((a, b) => a.basename.localeCompare(b.basename));
     return out;
   }
 }
