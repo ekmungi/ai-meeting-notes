@@ -12,6 +12,7 @@ import { TemplatePickerModal } from "./template-picker-modal";
 
 export class MeetingNotesSettingTab extends PluginSettingTab {
   plugin: AIMeetingNotesPlugin;
+  private expandedPresetIndex: number | null = null;
 
   constructor(app: App, plugin: AIMeetingNotesPlugin) {
     super(app, plugin);
@@ -565,12 +566,16 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
       // Collapsible body
       const bodyEl = presetEl.createDiv({ cls: "mn-preset-body" });
       bodyEl.style.padding = "0 0.75em 0.75em";
-      bodyEl.style.display = "none"; // collapsed by default
+      // Restore expanded state if this preset was open before re-render
+      const isExpanded = this.expandedPresetIndex === i;
+      bodyEl.style.display = isExpanded ? "block" : "none";
+      arrowEl.style.transform = isExpanded ? "rotate(90deg)" : "";
 
       headerEl.addEventListener("click", () => {
         const isOpen = bodyEl.style.display !== "none";
         bodyEl.style.display = isOpen ? "none" : "block";
         arrowEl.style.transform = isOpen ? "" : "rotate(90deg)";
+        this.expandedPresetIndex = isOpen ? null : i;
       });
 
       // --- Body contents ---
