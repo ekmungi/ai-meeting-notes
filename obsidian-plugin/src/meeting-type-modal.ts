@@ -1,34 +1,49 @@
 /**
- * Quick-switcher modal for selecting a meeting type on record start.
+ * Quick-switcher modal for selecting a meeting type or preset on record start.
  * Appears non-blocking -- recording is already in progress when this opens.
  */
 
 import { App, Modal, Setting, SuggestModal } from "obsidian";
+import type { MeetingPreset } from "./shared/types";
 
-/** Sentinel item appended to every suggestion list. */
-const ADD_NEW_ITEM = "+ Add new type...";
+/** Discriminated union for items rendered in the suggestion list. */
+type ModalItem =
+  | { kind: "type"; value: string }
+  | { kind: "separator" }
+  | { kind: "preset"; preset: MeetingPreset }
+  | { kind: "add-new" };
+
+/** Result passed to the onChoose callback. */
+export type ModalResult =
+  | { kind: "type"; value: string }
+  | { kind: "preset"; preset: MeetingPreset }
+  | null;
 
 /**
- * Fuzzy-filter popup that lets the user pick from configured meeting types.
- * Selecting the sentinel item opens NewTypeModal for inline creation.
+ * Fuzzy-filter popup that lets the user pick from configured meeting types
+ * or named presets. Selecting "+ Add new type..." opens NewTypeModal inline.
  */
-export class MeetingTypeModal extends SuggestModal<string> {
+export class MeetingTypeModal extends SuggestModal<ModalItem> {
   private readonly types: string[];
-  private readonly onChoose: (type: string | null) => void;
+  private readonly presets: MeetingPreset[];
+  private readonly onChoose: (result: ModalResult) => void;
   private resolved = false;
 
   /**
    * @param app      Obsidian app reference.
    * @param types    Pre-configured meeting type strings.
-   * @param onChoose Callback with the chosen type, or null on dismiss.
+   * @param presets  Named presets combining type + template + participants.
+   * @param onChoose Callback with the chosen result, or null on dismiss.
    */
   constructor(
     app: App,
     types: string[],
-    onChoose: (type: string | null) => void,
+    presets: MeetingPreset[],
+    onChoose: (result: ModalResult) => void,
   ) {
     super(app);
     this.types = types;
+    this.presets = presets;
     this.onChoose = onChoose;
 
     this.setPlaceholder("Select meeting type...");
@@ -36,47 +51,92 @@ export class MeetingTypeModal extends SuggestModal<string> {
   }
 
   /**
-   * Return types matching the query (case-insensitive substring),
-   * always with the add-new sentinel at the end.
+   * Return types and presets matching the query (case-insensitive substring).
+   * Presets are separated by a visual separator item and always follow types.
+   * The add-new sentinel is always appended last.
    */
-  getSuggestions(query: string): string[] {
+  getSuggestions(query: string): ModalItem[] {
     const lower = query.toLowerCase();
-    const filtered = this.types.filter((t) =>
-      t.toLowerCase().includes(lower),
-    );
-    return [...filtered, ADD_NEW_ITEM];
+    const filteredTypes = this.types
+      .filter((t) => t.toLowerCase().includes(lower))
+      .map((t): ModalItem => ({ kind: "type", value: t }));
+    const filteredPresets = this.presets
+      .filter((p) => p.name.toLowerCase().includes(lower))
+      .map((p): ModalItem => ({ kind: "preset", preset: p }));
+    const items: ModalItem[] = [...filteredTypes];
+    if (filteredPresets.length > 0) {
+      items.push({ kind: "separator" });
+      items.push(...filteredPresets);
+    }
+    items.push({ kind: "add-new" });
+    return items;
   }
 
-  /** Render a single suggestion row. */
-  renderSuggestion(item: string, el: HTMLElement): void {
-    el.setText(item);
-    if (item === ADD_NEW_ITEM) {
-      el.addClass("mn-add-new-type");
+  /** Render a single suggestion row based on its kind. */
+  renderSuggestion(item: ModalItem, el: HTMLElement): void {
+    switch (item.kind) {
+      case "type":
+        el.setText(item.value);
+        break;
+      case "separator":
+        el.setText("--- Presets ---");
+        el.addClass("mn-separator");
+        el.style.opacity = "0.5";
+        el.style.pointerEvents = "none";
+        el.style.fontStyle = "italic";
+        el.style.textAlign = "center";
+        break;
+      case "preset":
+        el.setText(item.preset.name);
+        el.addClass("mn-preset-item");
+        break;
+      case "add-new":
+        el.setText("+ Add new type...");
+        el.addClass("mn-add-new-type");
+        break;
     }
   }
 
   /**
    * Handle the user selecting a suggestion.
-   * If the sentinel was picked, open NewTypeModal instead.
+   * Separator items are no-ops. Add-new opens NewTypeModal.
    */
-  onChooseSuggestion(item: string): void {
+  onChooseSuggestion(item: ModalItem): void {
+    // Separator rows are non-interactive; skip them
+    if (item.kind === "separator") return;
     this.resolved = true;
-    if (item === ADD_NEW_ITEM) {
-      new NewTypeModal(this.app, (value) => {
-        this.onChoose(value);
-      }).open();
-      return;
+    switch (item.kind) {
+      case "type":
+        this.onChoose({ kind: "type", value: item.value });
+        break;
+      case "preset":
+        this.onChoose({ kind: "preset", preset: item.preset });
+        break;
+      case "add-new":
+        new NewTypeModal(this.app, (value) => {
+          if (value) {
+            this.onChoose({ kind: "type", value });
+          } else {
+            this.onChoose(null);
+          }
+        }).open();
+        break;
     }
-    this.onChoose(item);
   }
 
-  /** If dismissed without selection, pass null to the callback. */
+  /**
+   * If dismissed without selection, pass null to the callback.
+   * Defer via setTimeout: Obsidian fires onClose BEFORE onChooseSuggestion
+   * when the user picks an item, so we let onChooseSuggestion win the race.
+   */
   onClose(): void {
     super.onClose();
-    if (!this.resolved) {
+    if (this.resolved) return;
+    setTimeout(() => {
+      if (this.resolved) return;
       this.resolved = true;
       this.onChoose(null);
-    }
+    }, 0);
   }
 }
 

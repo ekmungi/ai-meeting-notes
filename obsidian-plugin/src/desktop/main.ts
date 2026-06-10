@@ -13,7 +13,6 @@ import {
   formatFileTimestamp,
   formatIsoTime,
   sanitizeFilename,
-  formatDuration,
 } from "../shared/format-utils";
 import {
   buildNotesYaml,
@@ -138,7 +137,7 @@ function getSessionHistory(): SessionEntry[] {
       const yamlMatch = content.match(/^---\n([\s\S]*?)\n---/);
       const yaml = yamlMatch ? yamlMatch[1] : "";
       const typeMatch = yaml.match(/^type:\s*"?([^"\n]+)"?$/m);
-      const durMatch = yaml.match(/^duration:\s*"?([^"\n]+)"?$/m);
+      const durMatch = yaml.match(/^duration-mins:\s*(\d+)$/m);
       entries.push({
         title: typeMatch?.[1]?.trim() || path.basename(file, ".md"),
         duration: durMatch?.[1]?.trim() || "",
@@ -238,7 +237,7 @@ function appendTranscriptSegment(
   fs.appendFileSync(currentTranscriptPath, output);
 }
 
-/** Update notes file YAML frontmatter with end_time and duration. */
+/** Update notes file YAML frontmatter with end-time and duration-mins. */
 function finalizeNotesFile(
   notesPath: string,
   durationSeconds: number,
@@ -246,12 +245,12 @@ function finalizeNotesFile(
   if (!notesPath || !fs.existsSync(notesPath)) return;
   const endTime = new Date();
   const endTimeStr = formatIsoTime(endTime);
-  const durationStr = formatDuration(durationSeconds);
+  const durationMins = Math.round(durationSeconds / 60);
   let content = fs.readFileSync(notesPath, "utf-8");
   content = content.replace(
     "tags: [meeting-notes]\n---",
-    `end_time: "${endTimeStr}"\n` +
-    `duration: "${durationStr}"\n` +
+    `end-time: "${endTimeStr}"\n` +
+    `duration-mins: ${durationMins}\n` +
     "tags: [meeting-notes]\n---",
   );
   fs.writeFileSync(notesPath, content);
@@ -426,7 +425,7 @@ function registerIpcHandlers(): void {
         currentTranscriptPath = path.join(outputDir, `${baseName}_transcript.md`);
 
         const transcriptBaseName = `${baseName}_transcript`;
-        const yaml = buildNotesYaml(now, transcriptBaseName, meetingType);
+        const yaml = buildNotesYaml(now, transcriptBaseName, []);
         const body = defaultNotesBody();
         fs.writeFileSync(currentNotesPath, yaml + body);
         initTranscriptFile(currentTranscriptPath, now);
@@ -534,7 +533,7 @@ function registerIpcHandlers(): void {
       }
       if (currentNotesPath && fs.existsSync(currentNotesPath)) {
         let notes = fs.readFileSync(currentNotesPath, "utf-8");
-        notes = notes.replace(/^transcript_file:\s*".*"\n/m, "");
+        notes = notes.replace(/^transcript-file:\s*".*"\n/m, "");
         fs.writeFileSync(currentNotesPath, notes);
       }
       return { ok: true };

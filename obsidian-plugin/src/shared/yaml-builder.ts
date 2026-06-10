@@ -4,15 +4,16 @@ import { formatIsoDate, formatIsoTime } from "./format-utils";
 
 /**
  * Build YAML frontmatter for a transcript file.
- * Mirrors the notes YAML structure with complementary fields.
+ * The `type: [meeting-transcript]` list distinguishes transcript files from
+ * notes files for Dataview-style queries.
  */
 export function buildTranscriptYaml(startTime: Date, notesBaseName: string): string {
   return [
     "---",
+    "type: [meeting-transcript]",
     `date: ${formatIsoDate(startTime)}`,
-    `start_time: "${formatIsoTime(startTime)}"`,
-    `notes_file: "[[${notesBaseName}]]"`,
-    "tags: [meeting-transcript]",
+    `start-time: "${formatIsoTime(startTime)}"`,
+    `notes-file: "[[${notesBaseName}]]"`,
     "---",
     "",
     "## Transcript",
@@ -24,26 +25,35 @@ export function buildTranscriptYaml(startTime: Date, notesBaseName: string): str
  * Build YAML frontmatter for a notes file.
  * Plugin-owned fields are always present; custom fields from user
  * templates are merged after the plugin fields.
+ *
+ * @param participants Basenames of selected stakeholder files (no .md, no brackets).
+ *                     Each becomes a `- "[[Name]]"` list item. Empty array
+ *                     omits the `participants:` key entirely.
  */
 export function buildNotesYaml(
   startTime: Date,
   transcriptBaseName: string,
-  meetingType: string,
+  participants: string[],
   customYaml?: Record<string, string>,
 ): string {
   const lines = [
     "---",
-    `type: "${meetingType}"`,
+    "type: [meeting]",
     `date: ${formatIsoDate(startTime)}`,
-    `start_time: "${formatIsoTime(startTime)}"`,
-    ...(transcriptBaseName ? [`transcript_file: "[[${transcriptBaseName}]]"`] : []),
+    `start-time: "${formatIsoTime(startTime)}"`,
+    ...(transcriptBaseName ? [`transcript-file: "[[${transcriptBaseName}]]"`] : []),
   ];
+  if (participants.length > 0) {
+    lines.push("attendees:");
+    for (const name of participants) {
+      lines.push(`  - "[[${name}]]"`);
+    }
+  }
   if (customYaml) {
     for (const [k, v] of Object.entries(customYaml)) {
       lines.push(`${k}: ${v}`);
     }
   }
-  lines.push("tags: [meeting-notes]");
   lines.push("---");
   return lines.join("\n") + "\n";
 }
@@ -99,5 +109,6 @@ export function parseTemplateContent(
 
 /** Plugin-owned YAML keys that cannot be overridden by user templates. */
 export const PLUGIN_YAML_KEYS = new Set([
-  "type", "date", "start_time", "transcript_file", "tags",
+  "type", "date", "start-time", "end-time", "duration-mins",
+  "transcript-file", "notes-file", "attendees",
 ]);

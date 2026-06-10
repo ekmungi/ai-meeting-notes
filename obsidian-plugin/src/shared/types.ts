@@ -1,3 +1,11 @@
+/** A saved combination of meeting type + template + stakeholders for one-click setup. */
+export interface MeetingPreset {
+  name: string;
+  meetingType: string;
+  templatePath: string;
+  participants: string[];
+}
+
 /** Plugin settings stored in Obsidian's plugin data (D024: independent client). */
 export interface MeetingNotesSettings {
   serverExePath: string;
@@ -19,6 +27,9 @@ export interface MeetingNotesSettings {
   recordWav: boolean;
   enableDiarization: boolean;
   floatingIndicatorPosition: "top-right" | "center-right" | "bottom-left";
+  stakeholdersFolder: string;
+  meetingTypeTemplates: Record<string, string>;
+  meetingPresets: MeetingPreset[];
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -41,6 +52,9 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   recordWav: false,
   enableDiarization: false,
   floatingIndicatorPosition: "top-right",
+  stakeholdersFolder: "",
+  meetingTypeTemplates: {},
+  meetingPresets: [],
 };
 
 /** Build the server base URL from port. */
