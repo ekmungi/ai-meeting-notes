@@ -33,6 +33,7 @@ function make() {
     sampleRate: 16000,
     endpointing: "conservative",
     speakerLabels: false,
+    keyTerms: [],
     onSegment: (s) => segments.push(s),
     onError: (m) => errors.push(m),
   });
@@ -40,13 +41,24 @@ function make() {
 }
 
 describe("buildStreamUrl", () => {
-  it("includes sample rate, formatting, endpointing params, and token", () => {
-    const url = buildStreamUrl("tok123", 16000, "conservative");
+  it("selects u3-rt-pro with endpointing, speaker labels, and keyterms", () => {
+    const url = buildStreamUrl("tok123", 16000, "conservative", true, ["Alice", "Acme Corp"]);
     expect(url).toContain("wss://streaming.assemblyai.com/v3/ws?");
     expect(url).toContain("sample_rate=16000");
-    expect(url).toContain("format_turns=true");
-    expect(url).toContain("end_of_turn_confidence_threshold=0.5");
+    expect(url).toContain("speech_model=u3-rt-pro");
+    expect(url).toContain("min_turn_silence=300");
+    expect(url).toContain("max_turn_silence=2000");
+    expect(url).toContain("speaker_labels=true");
+    expect(url).toContain("keyterms_prompt=Alice");
+    expect(url).toContain("keyterms_prompt=Acme+Corp");
     expect(url).toContain("token=tok123");
+    expect(url).not.toContain("format_turns");
+    expect(url).not.toContain("end_of_turn_confidence_threshold");
+  });
+  it("omits speaker_labels and keyterms when off/empty", () => {
+    const url = buildStreamUrl("tok123", 16000, "conservative", false, []);
+    expect(url).not.toContain("speaker_labels");
+    expect(url).not.toContain("keyterms_prompt");
   });
 });
 
@@ -108,7 +120,7 @@ describe("AssemblyAIClient", () => {
     const client = new AssemblyAIClient({
       tokenProvider: slowToken,
       wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
-      sampleRate: 16000, endpointing: "conservative", speakerLabels: false,
+      sampleRate: 16000, endpointing: "conservative", speakerLabels: false, keyTerms: [],
       onSegment: () => {}, onError: () => {},
     });
     await client.start();
@@ -144,7 +156,7 @@ describe("AssemblyAIClient", () => {
     const client = new AssemblyAIClient({
       tokenProvider: failingToken,
       wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
-      sampleRate: 16000, endpointing: "conservative", speakerLabels: false,
+      sampleRate: 16000, endpointing: "conservative", speakerLabels: false, keyTerms: [],
       onSegment: () => {}, onError: (m) => errors.push(m),
     });
     await client.start();

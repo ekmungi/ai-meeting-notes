@@ -239,6 +239,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
           sampleRate: SAMPLE_RATE,
           endpointing: this.settings.endpointing,
           speakerLabels: this.settings.enableDiarization,
+          keyTerms: [],   // populated in a later task (participant names + custom terms)
           onSegment, onError,
         }),
       },
