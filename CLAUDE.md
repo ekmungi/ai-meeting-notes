@@ -9,8 +9,11 @@
 
 ## Project Overview
 
-- The goal of this project is to build a AI meeting transcription application that can work both standalone and as a Obsidian Plugin.
-- Make decisions on the best possible architecuture based on simplicity and quality of code.
+- The goal of this project is to build a self-contained AI meeting transcription Obsidian plugin.
+- Audio is captured inside the plugin (mic + optional system loopback) and streamed directly to
+  AssemblyAI Universal-Streaming v3 -- no server, no standalone app, nothing to install beyond the
+  plugin (D063, supersedes the prior dual-client/Python-backend architecture).
+- Make decisions on the best possible architecture based on simplicity and quality of code.
 - Ask questions to clarify context.
 
 ## Critical Rules
@@ -49,17 +52,26 @@
 ## File Structure
 
 ```
-backend/                  # Python server: audio capture (WASAPI), engines (AssemblyAI/whisper)
-|-- src/meeting_notes/    #   audio/, engines/, server/, output/, session.py, config.py
-obsidian-plugin/          # TypeScript Obsidian plugin + Electron desktop app
-|-- src/                  #   plugin code: main.ts, settings.ts, modals, transcript-view
-|-- src/shared/           #   code shared between plugin and desktop (types, yaml, merge)
-|-- src/desktop/          #   standalone Electron app (main, preload, renderer)
-releases/                 # Build outputs (server exe, plugin zip, desktop installer)
+obsidian-plugin/             # The entire app -- a self-contained Obsidian plugin (TypeScript)
+|-- src/
+|   |-- main.ts              # Plugin entry: state machine, ribbon/status-bar, session factory
+|   |-- settings.ts          # Settings tab UI
+|   |-- *-modal.ts           # Meeting-type / participants / template-picker modals
+|   |-- transcript-view.ts   # Live transcript leaf view + file writing
+|   |-- floating-indicator.ts
+|   |-- audio/               # In-plugin capture pipeline
+|   |   |-- capture.ts       #   getUserMedia mic + Electron desktop-capture loopback
+|   |   |-- pipeline.ts      #   AudioWorklet graph, resample to 16kHz mono PCM
+|   |   |-- devices.ts  silence-monitor.ts  wav-writer.ts  frame-bus.ts  pcm-utils.ts
+|   |-- transcription/       # AssemblyAI streaming
+|   |   |-- assemblyai-client.ts  # v3 WebSocket client + reconnect
+|   |   |-- turn-handler.ts  recording-session.ts
+|   |-- shared/              # types, yaml-builder, merge-logic, format-utils, crypto
+|   |-- settings-migration.ts
 ```
 
-Note: the serverless-plugin refactor (in design, 2026-06) will remove `backend/`,
-`src/desktop/`, and `releases/` -- update this section when that lands.
+Audio path: capture (mic + loopback) -> pipeline (resample to PCM) -> frame-bus ->
+assemblyai-client (WebSocket) -> turn-handler -> transcript file + live view.
 
 ## Key Patterns
 

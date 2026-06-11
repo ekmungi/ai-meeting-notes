@@ -7,9 +7,11 @@
     "build": "esbuild src/main.ts --bundle --outfile=main.js --external:obsidian --format=cjs --platform=node --target=es2020",
     "dev": "esbuild src/main.ts --bundle --outfile=main.js --external:obsidian --format=cjs --platform=node --target=es2020 --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.1",
     "esbuild": "^0.21.0",
     "obsidian": "latest",
     "vitest": "^1.6.0"
