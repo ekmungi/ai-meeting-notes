@@ -1,14 +1,14 @@
 /**
  * AI Meeting Notes -- Obsidian Plugin
  *
- * Real-time meeting transcription. Spawns the Python backend server exe,
- * connects via WebSocket for live transcript, writes to vault notes.
- *
- * The plugin is an independent client (D024): it stores its own API key
- * and preferences. The server is a stateless transcription service.
+ * Self-contained real-time meeting transcription. Captures microphone and
+ * system audio in-process (Web Audio), streams PCM frames directly to
+ * AssemblyAI's v3 streaming API over WebSocket, and writes the live
+ * transcript to vault notes. No external server process is required.
  */
 
 import {
+  Menu,
   Notice,
   Plugin,
   TFile,
@@ -22,20 +22,17 @@ import { MeetingNotesSettingTab } from "./settings";
 import { MeetingTypeModal } from "./meeting-type-modal";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
-import { ServerLauncher } from "./server-launcher";
 import { TranscriptView } from "./transcript-view";
-import type {
-  MeetingNotesSettings,
-  PauseResponse,
-  ResumeResponse,
-  ServerMessage,
-  StartResponse,
-  StopResponse,
-} from "./types";
-import { DEFAULT_SETTINGS, serverBaseUrl } from "./types";
-import { WsClient } from "./ws-client";
+import type { MeetingNotesSettings } from "./types";
+import { DEFAULT_SETTINGS } from "./types";
 import { decryptValue, encryptValue } from "./crypto";
 import { FloatingIndicator } from "./floating-indicator";
+import { RecordingSession } from "./transcription/recording-session";
+import { acquireLoopback, acquireMic } from "./audio/capture";
+import { AudioPipeline, SAMPLE_RATE } from "./audio/pipeline";
+import { AssemblyAIClient } from "./transcription/assemblyai-client";
+import { chooseDevice, listInputDevices, watchDevices } from "./audio/devices";
+import { migrateSettings } from "./settings-migration";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -51,15 +48,14 @@ const FLYOUT_STOP  = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24
 export default class AIMeetingNotesPlugin extends Plugin {
   settings: MeetingNotesSettings = DEFAULT_SETTINGS;
 
-  private serverLauncher = new ServerLauncher();
-  private wsClient: WsClient | null = null;
+  private session: RecordingSession | null = null;
+  private unwatchDevices: (() => void) | null = null;
   private transcriptView: TranscriptView | null = null;
   private ribbonEl: HTMLElement | null = null;
   private statusBarEl: HTMLElement | null = null;
   private state: PluginState = "idle";
   private elapsedSeconds = 0;
   private elapsedTimer: ReturnType<typeof setInterval> | null = null;
-  private currentEngine = "";
 
   // Silence tracking
   private silentSeconds = 0;
@@ -153,19 +149,18 @@ export default class AIMeetingNotesPlugin extends Plugin {
     this.floatingIndicator?.destroy();
     this.flyoutEl?.remove();
     this.flyoutEl = null;
-    this.wsClient?.disconnect();
+    this.session?.stop().catch(() => undefined);
+    this.session = null;
+    this.unwatchDevices?.();
+    this.unwatchDevices = null;
     this.stopElapsedTimer();
-    await this.serverLauncher.stop();
   }
 
   async loadSettings(): Promise<void> {
-    const data = await this.loadData();
-    const merged = { ...DEFAULT_SETTINGS, ...data };
-    // Decrypt the API key from storage so in-memory settings always hold plaintext.
-    this.settings = {
-      ...merged,
-      assemblyaiApiKey: decryptValue(merged.assemblyaiApiKey),
-    };
+    // Migrate legacy server-era data, then decrypt the API key so in-memory
+    // settings always hold plaintext.
+    const merged = migrateSettings(await this.loadData());
+    this.settings = { ...merged, assemblyaiApiKey: decryptValue(merged.assemblyaiApiKey) };
   }
 
   async saveSettings(): Promise<void> {
@@ -174,11 +169,6 @@ export default class AIMeetingNotesPlugin extends Plugin {
       ...this.settings,
       assemblyaiApiKey: encryptValue(this.settings.assemblyaiApiKey),
     };
-    console.debug("AI Meeting Notes: saving settings", {
-      serverExePath: dataToSave.serverExePath,
-      serverPort: dataToSave.serverPort,
-      engine: dataToSave.engine,
-    });
     await this.saveData(dataToSave);
   }
 
@@ -201,6 +191,59 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
   }
 
+  /** Build a RecordingSession wired to real audio + AssemblyAI for current settings. */
+  private createSession(): RecordingSession {
+    // Exchange the long-lived API key for a short-lived streaming token.
+    const tokenProvider = async (): Promise<string> => {
+      const resp = await requestUrl({
+        url: "https://streaming.assemblyai.com/v3/token?expires_in_seconds=600",
+        headers: { authorization: this.settings.assemblyaiApiKey },
+        throw: false,
+      });
+      if (resp.status !== 200) {
+        throw new Error(resp.status === 401
+          ? "AssemblyAI rejected the API key - check it in settings."
+          : `AssemblyAI token request failed (${resp.status}) - are you online?`);
+      }
+      return resp.json.token;
+    };
+
+    return new RecordingSession(
+      {
+        micDeviceId: this.settings.micDeviceId,
+        captureSystemAudio: this.settings.captureSystemAudio,
+        recordWav: this.settings.recordWav,
+        silenceThresholdSeconds: this.settings.silenceTimerSeconds,
+        sampleRate: SAMPLE_RATE,
+        onSegment: (seg) => {
+          this.silentSeconds = 0;
+          this.session?.resetSilence();          // transcript activity proves speech (S8)
+          this.transcriptView?.onTranscript({ type: "transcript", ...seg });
+        },
+        onSilence: (silentSeconds) => {
+          this.silentSeconds = silentSeconds;
+          this.updateStatusBar();
+          this._handleSilenceAlert(silentSeconds);
+        },
+        onWarning: (m) => new Notice(m, 8000),
+        onError: (m) => new Notice(`Meeting Notes: ${m}`, 8000),
+      },
+      {
+        acquireMic,
+        acquireLoopback,
+        createPipeline: () => new AudioPipeline(),
+        createClient: (onSegment, onError) => new AssemblyAIClient({
+          tokenProvider,
+          wsFactory: (url) => new WebSocket(url),
+          sampleRate: SAMPLE_RATE,
+          endpointing: this.settings.endpointing,
+          speakerLabels: this.settings.enableDiarization,
+          onSegment, onError,
+        }),
+      },
+    );
+  }
+
   private async startRecording(): Promise<void> {
     if (!this.settings.disclaimerAccepted) {
       new Notice(
@@ -210,8 +253,8 @@ export default class AIMeetingNotesPlugin extends Plugin {
       return;
     }
 
-    if (!this.settings.serverExePath) {
-      new Notice("Configure the server executable path in AI Meeting Notes settings.");
+    if (!this.settings.assemblyaiApiKey) {
+      new Notice("Set your AssemblyAI API key in AI Meeting Notes settings.");
       return;
     }
 
@@ -221,121 +264,69 @@ export default class AIMeetingNotesPlugin extends Plugin {
     );
 
     this.setState("starting");
-
     try {
-      console.log("AI Meeting Notes: [1] Launching server...");
-      await this.serverLauncher.launch(
-        this.settings.serverExePath,
-        this.settings.serverPort
-      );
-      console.log("AI Meeting Notes: [1] Server launched successfully.");
+      this.session = this.createSession();
+      await this.session.start();
 
-      const baseUrl = serverBaseUrl(this.settings.serverPort);
-
-      console.log("AI Meeting Notes: [2] Connecting WebSocket...");
-      this.wsClient = new WsClient(baseUrl);
-      this.wsClient.onMessage = (msg: ServerMessage) => {
-        this.handleServerMessage(msg);
-      };
-      this.wsClient.connect();
-
-      console.log("AI Meeting Notes: [3] Posting /session/start...");
-      const startBody = {
-        engine: this.settings.engine,
-        assemblyai_api_key: this.settings.assemblyaiApiKey,
-        timestamp_mode: this.settings.timestampMode,
-        endpointing: this.settings.endpointing,
-        local_model_size: this.settings.localModelSize,
-        silence_threshold_seconds: this.settings.silenceTimerSeconds,
-        record_wav: this.settings.recordWav,
-        speaker_labels: this.settings.enableDiarization,
-      };
-
-      const resp = await requestUrl({
-        url: `${baseUrl}/session/start`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(startBody),
-        throw: false,
-      });
-
-      console.log(`AI Meeting Notes: [3] /session/start response status: ${resp.status}`);
-
-      if (resp.status < 200 || resp.status >= 300) {
-        const errorMsg = (() => {
-          try { return resp.json.error || `Server returned ${resp.status}`; } catch { return `Server returned ${resp.status}`; }
-        })();
-        throw new Error(errorMsg);
-      }
-
-      const data: StartResponse = resp.json;
-      this.currentEngine = data.engine;
       this.elapsedSeconds = 0;
-
-      console.log("AI Meeting Notes: [4] Creating vault note...");
       this.transcriptView = new TranscriptView(this.app, this.settings);
-      await this.transcriptView.createNote(data.engine);
+      await this.transcriptView.createNote("cloud");
 
       this.setState("recording");
       this.startElapsedTimer();
-
-      new Notice(`Recording started (${data.engine} engine)`);
+      this.watchDeviceChanges();
+      new Notice("Recording started");
 
       // Show meeting type modal non-blocking (recording is already running)
       this._showMeetingTypeModal();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const serverStderr = this.serverLauncher.lastError;
-      console.error("AI Meeting Notes: startRecording failed:", err);
-      if (serverStderr) console.error("AI Meeting Notes: Server stderr:", serverStderr);
-      const detail = serverStderr ? `\nServer: ${serverStderr.slice(0, 150)}` : "";
-      new Notice(`Failed to start recording: ${message}${detail}`);
-
-      this.wsClient?.disconnect();
-      this.wsClient = null;
-      await this.serverLauncher.stop();
+      new Notice(`Failed to start recording: ${message}`, 8000);
+      this.session = null;
       this.setState("idle");
     }
   }
 
   private async stopRecording(): Promise<void> {
+    if (!this.session) return;
     this.hideFlyout();
     this.setState("stopping");
-    const baseUrl = serverBaseUrl(this.settings.serverPort);
-
     try {
-      const resp = await requestUrl({
-        url: `${baseUrl}/session/stop`,
-        method: "POST",
-        throw: false,
-      });
-
-      if (resp.status < 200 || resp.status >= 300) {
-        throw new Error(resp.json.error || `Server returned ${resp.status}`);
-      }
-
-      const data: StopResponse = resp.json;
+      const result = await this.session.stop();
       // Add WAV reference BEFORE finalize (finalize nulls the file references)
-      if (data.wav_path && this.transcriptView) {
-        await this.transcriptView.addWavReference(data.wav_path);
+      if (result.wavBuffer && this.transcriptView) {
+        const wavPath = await this.transcriptView.saveWav(result.wavBuffer);
+        await this.transcriptView.addWavReference(wavPath);
       }
-      await this.transcriptView?.finalize(data.duration_seconds);
+      await this.transcriptView?.finalize(result.durationSeconds);
       this.stopElapsedTimer();
-
-      const minutes = Math.floor(data.duration_seconds / 60);
-      new Notice(`Recording stopped (${minutes}m)`);
+      new Notice(`Recording stopped (${Math.floor(result.durationSeconds / 60)}m)`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      new Notice(`Failed to stop recording: ${message}`);
+      new Notice(`Failed to stop recording: ${err instanceof Error ? err.message : String(err)}`);
     }
+    this.session = null;
+    this.unwatchDevices?.();
+    this.unwatchDevices = null;
+    this.clearSilenceUi();
+    this.setState("idle");
+  }
 
-    this.wsClient?.disconnect();
-    this.wsClient = null;
+  private pauseRecording(): void {
+    this.session?.pause();
+    this.stopElapsedTimer();
+    this.setState("paused");
+    new Notice("Recording paused");
+  }
 
-    if (!this.settings.keepServerRunning) {
-      await this.serverLauncher.stop();
-    }
+  private resumeRecording(): void {
+    this.session?.resume();
+    this.setState("recording");
+    this.startElapsedTimer();
+    new Notice("Recording resumed");
+  }
 
+  /** Reset all silence-alert UI state: counter, dismissal flag, notice, auto-stop timer. */
+  private clearSilenceUi(): void {
     this.silentSeconds = 0;
     this.silenceDismissed = false;
     this.silenceNotice?.hide();
@@ -344,111 +335,41 @@ export default class AIMeetingNotesPlugin extends Plugin {
       clearTimeout(this.silenceAutoStopTimer);
       this.silenceAutoStopTimer = null;
     }
-
-    this.setState("idle");
   }
 
-  private async pauseRecording(): Promise<void> {
-    const baseUrl = serverBaseUrl(this.settings.serverPort);
-
-    try {
-      const resp = await requestUrl({
-        url: `${baseUrl}/session/pause`,
-        method: "POST",
-        throw: false,
-      });
-
-      if (resp.status < 200 || resp.status >= 300) {
-        throw new Error(resp.json.error || `Server returned ${resp.status}`);
-      }
-
-      const data: PauseResponse = resp.json;
-      this.elapsedSeconds = data.elapsed_seconds;
-      this.stopElapsedTimer();
-      this.setState("paused");
-      new Notice("Recording paused");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      new Notice(`Failed to pause: ${message}`);
-    }
-  }
-
-  private async resumeRecording(): Promise<void> {
-    const baseUrl = serverBaseUrl(this.settings.serverPort);
-
-    try {
-      const resp = await requestUrl({
-        url: `${baseUrl}/session/resume`,
-        method: "POST",
-        throw: false,
-      });
-
-      if (resp.status < 200 || resp.status >= 300) {
-        throw new Error(resp.json.error || `Server returned ${resp.status}`);
-      }
-
-      const data: ResumeResponse = resp.json;
-      this.elapsedSeconds = data.elapsed_seconds;
-      this.setState("recording");
-      this.startElapsedTimer();
-      new Notice("Recording resumed");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      new Notice(`Failed to resume: ${message}`);
-    }
-  }
-
-  private handleServerMessage(msg: ServerMessage): void {
-    switch (msg.type) {
-      case "transcript":
-        this.silentSeconds = 0;
-        this.transcriptView?.onTranscript(msg);
-        break;
-      case "silence":
-        if ("silent_seconds" in msg) {
-          this.silentSeconds = (msg as { silent_seconds: number }).silent_seconds;
-          this.updateStatusBar();
-          this._handleSilenceAlert(this.silentSeconds);
-        }
-        break;
-      case "status":
-        this.elapsedSeconds = msg.elapsed_seconds;
-        this.updateStatusBar();
-        if (msg.state === "stopped" && (this.state === "recording" || this.state === "paused")) {
-          this.onRecordingStopped();
-        }
-        break;
-      case "error":
-        new Notice(`Meeting Notes: ${msg.message}`);
-        if (this.state === "recording" || this.state === "paused") {
-          this.onRecordingStopped();
-        }
-        break;
-      case "pong":
-        break;
-    }
-  }
-
+  /**
+   * Error-path teardown: finalize the note and drop the session without a
+   * graceful stop (used when the session is already broken).
+   */
   private async onRecordingStopped(): Promise<void> {
     await this.transcriptView?.finalize(this.elapsedSeconds);
     this.stopElapsedTimer();
-    this.wsClient?.disconnect();
-    this.wsClient = null;
-
-    if (!this.settings.keepServerRunning) {
-      await this.serverLauncher.stop();
-    }
-
-    this.silentSeconds = 0;
-    this.silenceDismissed = false;
-    this.silenceNotice?.hide();
-    this.silenceNotice = null;
-    if (this.silenceAutoStopTimer) {
-      clearTimeout(this.silenceAutoStopTimer);
-      this.silenceAutoStopTimer = null;
-    }
-
+    this.session?.stop().catch(() => undefined);
+    this.session = null;
+    this.unwatchDevices?.();
+    this.unwatchDevices = null;
+    this.clearSilenceUi();
     this.setState("idle");
+  }
+
+  /** React to OS device changes: re-acquire the preferred mic when it returns. */
+  private watchDeviceChanges(): void {
+    this.unwatchDevices = watchDevices(async () => {
+      if (!this.session || this.state === "idle" || this.state === "stopping") return;
+      try {
+        const devices = await listInputDevices();
+        const preferred = this.settings.micDeviceId === "default"
+          ? null
+          : { id: this.settings.micDeviceId, label: this.settings.micDeviceLabel };
+        const target = chooseDevice(preferred, devices);
+        await this.session.swapMic(target);
+        new Notice(target === this.settings.micDeviceId || target === "default"
+          ? "Audio devices changed - microphone re-acquired."
+          : "Preferred microphone unavailable - using system default.", 5000);
+      } catch (err) {
+        console.error("Device recovery failed:", err);
+      }
+    });
   }
 
   /** Show the meeting type selector, then chain into template + participants. */
@@ -592,8 +513,8 @@ export default class AIMeetingNotesPlugin extends Plugin {
         clearTimeout(this.silenceAutoStopTimer);
         this.silenceAutoStopTimer = null;
       }
-      // Tell server to reset its silence counter so it stops broadcasting
-      this.wsClient?.send({ type: "reset_silence" });
+      // Reset the in-session silence monitor so it stops alerting
+      this.session?.resetSilence();
     });
 
     const dismissBtn = document.createElement("button");
@@ -685,26 +606,56 @@ export default class AIMeetingNotesPlugin extends Plugin {
         ? ` | Silent ${Math.floor(this.silentSeconds)}s`
         : "";
       const dot = this.silentSeconds > 0 ? "\u{1F7E0}" : "\u{1F534}";
-      this.statusBarEl.setText(`${dot} ${this.currentEngine} | ${timeStr}${silenceInfo}`);
+      this.statusBarEl.setText(`${dot} ${timeStr}${silenceInfo}`);
       this.statusBarEl.style.cursor = "pointer";
-      this.statusBarEl.title = "Click to stop recording";
+      this.statusBarEl.title = "Click to stop recording. Right-click to switch microphone.";
+      this.statusBarEl.oncontextmenu = this.buildMicMenuHandler();
     } else if (this.state === "paused") {
-      this.statusBarEl.setText(`\u{23F8}\u{FE0F} ${this.currentEngine} | ${timeStr} (paused)`);
+      this.statusBarEl.setText(`\u{23F8}\u{FE0F} ${timeStr} (paused)`);
       this.statusBarEl.style.cursor = "pointer";
-      this.statusBarEl.title = "Click to stop recording";
+      this.statusBarEl.title = "Click to stop recording. Right-click to switch microphone.";
+      this.statusBarEl.oncontextmenu = this.buildMicMenuHandler();
     } else if (this.state === "starting") {
       this.statusBarEl.setText("Meeting Notes: Starting...");
       this.statusBarEl.style.cursor = "";
       this.statusBarEl.title = "";
+      this.statusBarEl.oncontextmenu = null;
     } else if (this.state === "stopping") {
       this.statusBarEl.setText("Meeting Notes: Stopping...");
       this.statusBarEl.style.cursor = "";
       this.statusBarEl.title = "";
+      this.statusBarEl.oncontextmenu = null;
     } else {
       this.statusBarEl.setText("");
       this.statusBarEl.style.cursor = "";
       this.statusBarEl.title = "";
+      this.statusBarEl.oncontextmenu = null;
     }
+  }
+
+  /**
+   * Build the right-click handler for the status bar: shows a microphone
+   * picker menu so the user can switch input devices mid-recording.
+   */
+  private buildMicMenuHandler(): (e: MouseEvent) => void {
+    return (e: MouseEvent) => {
+      e.preventDefault();
+      const menu = new Menu();
+      void listInputDevices().then((devices) => {
+        for (const d of devices) {
+          menu.addItem((i) => i
+            .setTitle(d.label || "Unnamed device")
+            .setChecked(d.deviceId === this.settings.micDeviceId)
+            .onClick(async () => {
+              this.settings = { ...this.settings, micDeviceId: d.deviceId, micDeviceLabel: d.label };
+              await this.saveSettings();
+              await this.session?.swapMic(d.deviceId);
+              new Notice(`Microphone: ${d.label || d.deviceId}`);
+            }));
+        }
+        menu.showAtMouseEvent(e);
+      });
+    };
   }
 
   // --- Hover flyout ---
