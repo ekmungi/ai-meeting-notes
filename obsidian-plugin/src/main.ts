@@ -35,6 +35,7 @@ import { AssemblyAIClient } from "./transcription/assemblyai-client";
 import { chooseDevice, listInputDevices, watchDevices } from "./audio/devices";
 import { migrateSettings } from "./settings-migration";
 import { buildKeyTerms } from "./shared/keyterms";
+import { listMarkdownBasenames } from "./vault-files";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -193,15 +194,12 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
   }
 
-  /** Collect contact-folder basenames for keyterm boosting (best-effort). */
+  /**
+   * Collect contact-folder basenames (recursively, including subfolders) for
+   * keyterm boosting, matching how the participants picker gathers contacts.
+   */
   private _contactNames(): string[] {
-    const folderPath = this.settings.stakeholdersFolder;
-    if (!folderPath) return [];
-    const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
-    if (!(folder instanceof TFolder)) return [];
-    return folder.children
-      .filter((c): c is TFile => c instanceof TFile && c.extension === "md")
-      .map((f) => f.basename);
+    return listMarkdownBasenames(this.app, this.settings.stakeholdersFolder);
   }
 
   /** Build a RecordingSession wired to real audio + AssemblyAI for current settings. */
