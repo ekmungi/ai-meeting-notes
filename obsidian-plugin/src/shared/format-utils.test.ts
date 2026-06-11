@@ -1,6 +1,14 @@
 // Tests for filename-segment helpers.
 import { describe, expect, it } from "vitest";
-import { sanitizeSegment, sanitizeFilename, buildMeetingBaseName } from "./format-utils";
+import { sanitizeSegment, sanitizeFilename, buildMeetingBaseName, formatFileTimestamp, formatIsoTime } from "./format-utils";
+
+describe("formatFileTimestamp / formatIsoTime", () => {
+  it("formats a date for filenames and an ISO time", () => {
+    const d = new Date(2026, 5, 11, 14, 30, 5); // local time: 2026-06-11 14:30:05
+    expect(formatFileTimestamp(d)).toBe("20260611_14-30");
+    expect(formatIsoTime(d)).toBe("14:30:05");
+  });
+});
 
 describe("sanitizeSegment", () => {
   it("strips illegal chars and trims, no fallback", () => {
