@@ -20,6 +20,8 @@ export interface TurnEvent {
   turn_is_formatted: boolean;
   end_of_turn: boolean;
   turn_order: number;
+  /** Native per-turn speaker label from u3-rt-pro diarization (e.g. "A"). */
+  speaker_label?: string;
 }
 
 /** Emitted transcript segment (shape matches the old server TranscriptMessage). */
@@ -81,9 +83,7 @@ export class TurnHandler {
     if (event.turn_is_formatted && event.end_of_turn) {
       // Formatted final - the only event that reaches the transcript file.
       this.lastTurnEndTime = this.now();
-      const speaker = this.opts.speakerLabels
-        ? String.fromCharCode("A".charCodeAt(0) + ((event.turn_order ?? 0) % 26))
-        : null;
+      const speaker = this.opts.speakerLabels ? (event.speaker_label ?? null) : null;
       this.handleFinal(text, elapsed, speaker);
       return;
     }

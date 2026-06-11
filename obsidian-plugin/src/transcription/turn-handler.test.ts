@@ -59,13 +59,19 @@ describe("TurnHandler", () => {
     expect(segments.filter((s) => !s.is_partial)[0].text).toBe("Right");
   });
 
-  it("maps turn_order to speakers when enabled", () => {
+  it("uses the native speaker_label when enabled", () => {
     const { h, segments } = make({ speakerLabels: true });
-    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 0 });
-    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 1 });
+    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "A" });
+    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 1, speaker_label: "B" });
     const finals = segments.filter((s) => !s.is_partial);
     expect(finals[0].speaker).toBe("A");
     expect(finals[1].speaker).toBe("B");
+  });
+
+  it("leaves speaker null when diarization is off", () => {
+    const { h, segments } = make({ speakerLabels: false });
+    h.handleTurn({ transcript: "Anyone speaking here.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "A" });
+    expect(segments.filter((s) => !s.is_partial)[0].speaker).toBeNull();
   });
 
   it("requests force endpoint after 20s of partial-only speech", () => {
