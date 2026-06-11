@@ -220,6 +220,19 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("Key terms")
+      .setDesc("Names, jargon, or acronyms to boost recognition (comma or newline separated). Contact names are added automatically.")
+      .addTextArea((ta) => {
+        ta.setValue(this.plugin.settings.keyTerms);
+        ta.inputEl.rows = 3;
+        ta.inputEl.style.width = "100%";
+        ta.onChange(async (value) => {
+          this.plugin.settings = { ...this.plugin.settings, keyTerms: value };
+          await this.plugin.saveSettings();
+        });
+      });
+
     // --- Silence ---
     containerEl.createEl("h3", { text: "Silence Detection" });
 

@@ -22,6 +22,7 @@ import { MeetingNotesSettingTab } from "./settings";
 import { MeetingTypeModal } from "./meeting-type-modal";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
+import { MeetingDescriptionModal } from "./meeting-description-modal";
 import { TranscriptView } from "./transcript-view";
 import type { MeetingNotesSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
@@ -33,6 +34,8 @@ import { AudioPipeline, SAMPLE_RATE } from "./audio/pipeline";
 import { AssemblyAIClient } from "./transcription/assemblyai-client";
 import { chooseDevice, listInputDevices, watchDevices } from "./audio/devices";
 import { migrateSettings } from "./settings-migration";
+import { buildKeyTerms } from "./shared/keyterms";
+import { listMarkdownBasenames } from "./vault-files";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -191,6 +194,14 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
   }
 
+  /**
+   * Collect contact-folder basenames (recursively, including subfolders) for
+   * keyterm boosting, matching how the participants picker gathers contacts.
+   */
+  private _contactNames(): string[] {
+    return listMarkdownBasenames(this.app, this.settings.stakeholdersFolder);
+  }
+
   /** Build a RecordingSession wired to real audio + AssemblyAI for current settings. */
   private createSession(): RecordingSession {
     // Exchange the long-lived API key for a short-lived streaming token.
@@ -238,6 +249,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
           sampleRate: SAMPLE_RATE,
           endpointing: this.settings.endpointing,
           speakerLabels: this.settings.enableDiarization,
+          keyTerms: buildKeyTerms(this._contactNames(), this.settings.keyTerms),
           onSegment, onError,
         }),
       },
@@ -371,8 +383,11 @@ export default class AIMeetingNotesPlugin extends Plugin {
           const { preset } = result;
           this.transcriptView.setTemplateOverride(preset.templatePath || null);
           this.transcriptView.setParticipants(preset.participants);
-          await this.transcriptView.rebuildNotesContent(preset.name);
-          await this.transcriptView.renameForType(preset.name);
+          this._showDescriptionModal(async (desc) => {
+            this.transcriptView?.setDescription(desc);
+            await this.transcriptView?.rebuildNotesContent(preset.name);
+            await this.transcriptView?.renameForType(preset.name);
+          });
           return;
         }
 
@@ -388,13 +403,16 @@ export default class AIMeetingNotesPlugin extends Plugin {
           await this.saveSettings();
         }
 
-        // Chain: template picker (maybe) -> participants -> rebuild + rename
+        // Chain: template picker (maybe) -> participants -> description -> rebuild + rename
         this._resolveTemplate(selectedType, (templatePath) => {
           this.transcriptView?.setTemplateOverride(templatePath);
-          this._showParticipantsModal(async (participants) => {
+          this._showParticipantsModal((participants) => {
             this.transcriptView?.setParticipants(participants);
-            await this.transcriptView?.rebuildNotesContent(selectedType);
-            await this.transcriptView?.renameForType(selectedType);
+            this._showDescriptionModal(async (desc) => {
+              this.transcriptView?.setDescription(desc);
+              await this.transcriptView?.rebuildNotesContent(selectedType);
+              await this.transcriptView?.renameForType(selectedType);
+            });
           });
         });
       },
@@ -454,6 +472,11 @@ export default class AIMeetingNotesPlugin extends Plugin {
       return;
     }
     new ParticipantsModal(this.app, folderPath, done).open();
+  }
+
+  /** Open the description modal; calls done("") on skip/close. */
+  private _showDescriptionModal(done: (description: string) => void): void {
+    new MeetingDescriptionModal(this.app, done).open();
   }
 
   // --- Silence alerts ---

@@ -31,6 +31,8 @@ export interface MeetingNotesSettings {
   micDeviceLabel: string;
   /** Whether to capture system audio (loopback) in addition to the microphone. */
   captureSystemAudio: boolean;
+  /** Comma/newline-separated terms (names, jargon) to boost in transcription. */
+  keyTerms: string;
 }
 
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
@@ -54,6 +56,7 @@ export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   micDeviceId: "default",
   micDeviceLabel: "",
   captureSystemAudio: true,
+  keyTerms: "",
 };
 
 /** WebSocket transcript message; consumed by the transcript view. */

@@ -2,12 +2,16 @@
 // Converts AssemblyAI v3 Turn events into transcript segments - direct port of
 // the turn/fragment logic in backend engines/cloud.py. Pure: all IO injected.
 
-/** AssemblyAI streaming endpointing presets (verbatim from cloud.py). */
+/**
+ * Endpointing sensitivity presets for u3-rt-pro streaming. Values are turn-silence
+ * thresholds in milliseconds: min_turn_silence is the minimum pause to consider a
+ * turn ended (when punctuation-confident); max_turn_silence is the hard cap.
+ */
 export const ENDPOINTING_PRESETS = {
-  aggressive:        { end_of_turn_confidence_threshold: 0.3, min_end_of_turn_silence_when_confident: 160, max_turn_silence: 800 },
-  balanced:          { end_of_turn_confidence_threshold: 0.4, min_end_of_turn_silence_when_confident: 400, max_turn_silence: 1280 },
-  conservative:      { end_of_turn_confidence_threshold: 0.5, min_end_of_turn_silence_when_confident: 560, max_turn_silence: 2000 },
-  very_conservative: { end_of_turn_confidence_threshold: 0.7, min_end_of_turn_silence_when_confident: 700, max_turn_silence: 3000 },
+  aggressive:        { min_turn_silence: 100, max_turn_silence: 800 },
+  balanced:          { min_turn_silence: 200, max_turn_silence: 1280 },
+  conservative:      { min_turn_silence: 300, max_turn_silence: 2000 },
+  very_conservative: { min_turn_silence: 400, max_turn_silence: 3000 },
 } as const;
 
 /** Subset of the AAI v3 Turn message this handler consumes. */
@@ -16,6 +20,8 @@ export interface TurnEvent {
   turn_is_formatted: boolean;
   end_of_turn: boolean;
   turn_order: number;
+  /** Native per-turn speaker label from u3-rt-pro diarization (e.g. "A"). */
+  speaker_label?: string;
 }
 
 /** Emitted transcript segment (shape matches the old server TranscriptMessage). */
@@ -77,9 +83,7 @@ export class TurnHandler {
     if (event.turn_is_formatted && event.end_of_turn) {
       // Formatted final - the only event that reaches the transcript file.
       this.lastTurnEndTime = this.now();
-      const speaker = this.opts.speakerLabels
-        ? String.fromCharCode("A".charCodeAt(0) + ((event.turn_order ?? 0) % 26))
-        : null;
+      const speaker = this.opts.speakerLabels ? (event.speaker_label ?? null) : null;
       this.handleFinal(text, elapsed, speaker);
       return;
     }

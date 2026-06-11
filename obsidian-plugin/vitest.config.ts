@@ -16,6 +16,8 @@ export default defineConfig({
         "src/transcription/**/*.ts",
         "src/settings-migration.ts",
         "src/shared/yaml-builder.ts",
+        "src/shared/format-utils.ts",
+        "src/shared/keyterms.ts",
       ],
       exclude: ["**/*.test.ts", "src/audio/capture.ts", "src/audio/pipeline.ts"],
       thresholds: { statements: 80, branches: 80, functions: 80, lines: 80 },

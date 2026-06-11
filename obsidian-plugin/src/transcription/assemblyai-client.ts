@@ -15,22 +15,26 @@ const FORCE_ENDPOINT_INTERVAL_S = 20;
 export type TokenProvider = () => Promise<string>;
 
 /**
- * Build the v3 streaming URL with endpointing params baked in.
- * @param token - Short-lived streaming token from AssemblyAI.
- * @param sampleRate - Audio sample rate in Hz (e.g. 16000).
- * @param endpointing - Preset name from ENDPOINTING_PRESETS.
- * @returns Full wss:// URL ready for WebSocket construction.
+ * Build the v3 streaming URL for the u3-rt-pro model with diarization,
+ * turn-silence endpointing, and keyterm boosting baked in.
  */
-export function buildStreamUrl(token: string, sampleRate: number, endpointing: keyof typeof ENDPOINTING_PRESETS): string {
+export function buildStreamUrl(
+  token: string,
+  sampleRate: number,
+  endpointing: keyof typeof ENDPOINTING_PRESETS,
+  speakerLabels: boolean,
+  keyTerms: string[],
+): string {
   const preset = ENDPOINTING_PRESETS[endpointing] ?? ENDPOINTING_PRESETS.conservative;
   const params = new URLSearchParams({
     sample_rate: String(sampleRate),
-    format_turns: "true",
-    end_of_turn_confidence_threshold: String(preset.end_of_turn_confidence_threshold),
-    min_end_of_turn_silence_when_confident: String(preset.min_end_of_turn_silence_when_confident),
+    speech_model: "u3-rt-pro",   // formatting always on; no format_turns
+    min_turn_silence: String(preset.min_turn_silence),
     max_turn_silence: String(preset.max_turn_silence),
     token,
   });
+  if (speakerLabels) params.set("speaker_labels", "true");
+  for (const term of keyTerms) params.append("keyterms_prompt", term);
   return `wss://streaming.assemblyai.com/v3/ws?${params.toString()}`;
 }
 
@@ -46,6 +50,8 @@ export interface AssemblyAIClientOptions {
   endpointing: keyof typeof ENDPOINTING_PRESETS;
   /** Whether to request speaker diarization labels. */
   speakerLabels: boolean;
+  /** Key terms to boost recognition (names, jargon); may be empty. */
+  keyTerms: string[];
   /** Called with each finalized transcript segment. */
   onSegment: (segment: Segment) => void;
   /** Called with a human-readable message when the connection cannot be restored. */
@@ -145,7 +151,7 @@ export class AssemblyAIClient {
     const token = await this.opts.tokenProvider();
     // stop() may have raced the async token fetch — do not open a new socket.
     if (this.stopping) return;
-    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing));
+    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing, this.opts.speakerLabels, this.opts.keyTerms));
     this.ws = ws;
 
     ws.onopen = () => {

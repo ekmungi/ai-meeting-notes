@@ -59,13 +59,22 @@ describe("TurnHandler", () => {
     expect(segments.filter((s) => !s.is_partial)[0].text).toBe("Right");
   });
 
-  it("maps turn_order to speakers when enabled", () => {
+  it("uses the native speaker_label, not turn_order, when enabled", () => {
     const { h, segments } = make({ speakerLabels: true });
-    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 0 });
-    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 1 });
+    // turn_order is deliberately misaligned with speaker_label: if the old
+    // turn_order mapping were still used these would render "F"/"J", proving
+    // the label comes from speaker_label.
+    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 5, speaker_label: "B" });
+    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 9, speaker_label: "A" });
     const finals = segments.filter((s) => !s.is_partial);
-    expect(finals[0].speaker).toBe("A");
-    expect(finals[1].speaker).toBe("B");
+    expect(finals[0].speaker).toBe("B");
+    expect(finals[1].speaker).toBe("A");
+  });
+
+  it("leaves speaker null when diarization is off", () => {
+    const { h, segments } = make({ speakerLabels: false });
+    h.handleTurn({ transcript: "Anyone speaking here.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "A" });
+    expect(segments.filter((s) => !s.is_partial)[0].speaker).toBeNull();
   });
 
   it("requests force endpoint after 20s of partial-only speech", () => {
@@ -79,8 +88,9 @@ describe("TurnHandler", () => {
 });
 
 describe("ENDPOINTING_PRESETS", () => {
-  it("has the four presets with conservative defaults", () => {
-    expect(ENDPOINTING_PRESETS.conservative.end_of_turn_confidence_threshold).toBe(0.5);
+  it("has the four presets with u3-rt-pro turn-silence params", () => {
+    expect(ENDPOINTING_PRESETS.conservative.min_turn_silence).toBe(300);
+    expect(ENDPOINTING_PRESETS.conservative.max_turn_silence).toBe(2000);
     expect(Object.keys(ENDPOINTING_PRESETS)).toEqual(
       ["aggressive", "balanced", "conservative", "very_conservative"]);
   });
