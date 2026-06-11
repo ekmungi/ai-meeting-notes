@@ -3,12 +3,13 @@
  * Plugin stores its own API key and preferences (D024: independent client).
  */
 
-import { App, Notice, PluginSettingTab, Setting, TextComponent, TFile, TFolder } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting, TFile, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
 import { isEncryptionAvailable } from "./crypto";
 import { FolderSuggest } from "./suggest-utils";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
+import { listInputDevices } from "./audio/devices";
 
 export class MeetingNotesSettingTab extends PluginSettingTab {
   plugin: AIMeetingNotesPlugin;
@@ -43,87 +44,6 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           })
       );
 
-    // --- Server ---
-    containerEl.createEl("h3", { text: "Server" });
-
-    let exePathText: TextComponent;
-
-    new Setting(containerEl)
-      .setName("Server executable path")
-      .setDesc("Path to ai-meeting-notes-server.exe (from the desktop app install)")
-      .addText((text) => {
-        exePathText = text;
-        text
-          .setPlaceholder("C:\\Program Files\\AI Meeting Notes\\ai-meeting-notes-server.exe")
-          .setValue(this.plugin.settings.serverExePath)
-          .onChange(async (value) => {
-            this.plugin.settings = { ...this.plugin.settings, serverExePath: value };
-            await this.plugin.saveSettings();
-          });
-      })
-      .addButton((btn) => {
-        btn.setButtonText("Browse...").onClick(async () => {
-          // Use Electron's native dialog for reliable file path access.
-          // File.path is unavailable in newer Electron versions.
-          try {
-            const remote = (window as any).require("@electron/remote");
-            const result = await remote.dialog.showOpenDialog({
-              title: "Select server executable",
-              filters: [{ name: "Executables", extensions: ["exe"] }],
-              properties: ["openFile"],
-            });
-            if (result.canceled || !result.filePaths?.length) return;
-            const selectedPath = result.filePaths[0];
-            exePathText.setValue(selectedPath);
-            this.plugin.settings = { ...this.plugin.settings, serverExePath: selectedPath };
-            await this.plugin.saveSettings();
-          } catch {
-            // Fallback: HTML file input (File.path may work on some builds)
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = ".exe";
-            input.addEventListener("change", async () => {
-              const file = input.files?.[0];
-              if (!file) return;
-              const filePath = (file as unknown as { path?: string }).path ?? "";
-              if (!filePath) return;
-              exePathText.setValue(filePath);
-              this.plugin.settings = { ...this.plugin.settings, serverExePath: filePath };
-              await this.plugin.saveSettings();
-            }, { once: true });
-            input.click();
-          }
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Server port")
-      .setDesc("Port for the backend server (default: 9876)")
-      .addText((text) =>
-        text
-          .setPlaceholder("9876")
-          .setValue(String(this.plugin.settings.serverPort))
-          .onChange(async (value) => {
-            const port = parseInt(value, 10);
-            if (port >= 1 && port <= 65535) {
-              this.plugin.settings = { ...this.plugin.settings, serverPort: port };
-              await this.plugin.saveSettings();
-            }
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Keep server running after stop")
-      .setDesc("If enabled, the server process stays alive after stopping a recording")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.keepServerRunning)
-          .onChange(async (value) => {
-            this.plugin.settings = { ...this.plugin.settings, keepServerRunning: value };
-            await this.plugin.saveSettings();
-          })
-      );
-
     // --- Transcription ---
     containerEl.createEl("h3", { text: "Transcription" });
 
@@ -154,42 +74,6 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName("Engine")
-      .setDesc("Transcription engine to use")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("cloud", "Cloud (AssemblyAI)")
-          .addOption("local", "Local (Whisper)")
-          .addOption("auto", "Auto (cloud with local fallback)")
-          .setValue(this.plugin.settings.engine)
-          .onChange(async (value) => {
-            this.plugin.settings = {
-              ...this.plugin.settings,
-              engine: value as "cloud" | "local" | "auto",
-            };
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Local model")
-      .setDesc("Whisper model used when the local engine is selected. Distil models load faster with similar accuracy. Changes take effect on next recording.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("tiny.en", "Tiny (~75 MB) — fastest, basic quality")
-          .addOption("base.en", "Base (~145 MB) — fast, decent quality")
-          .addOption("distil-small.en", "Distil Small (~166 MB) — fast, good quality")
-          .addOption("small.en", "Small (~244 MB) — recommended")
-          .addOption("distil-large-v3", "Distil Large v3 (~756 MB) — best quality + speed")
-          .addOption("medium.en", "Medium (~769 MB) — high accuracy, slow")
-          .setValue(this.plugin.settings.localModelSize)
-          .onChange(async (value) => {
-            this.plugin.settings = { ...this.plugin.settings, localModelSize: value };
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
       .setName("Endpointing")
       .setDesc("How aggressively to split sentences at pauses")
       .addDropdown((dropdown) =>
@@ -207,6 +91,43 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    // --- Audio ---
+    new Setting(containerEl).setName("Audio").setHeading();
+
+    // Microphone picker - enumerating devices needs one mic permission grant,
+    // so the dropdown is populated lazily on settings open.
+    const micSetting = new Setting(containerEl)
+      .setName("Microphone")
+      .setDesc("Input device used for recording. Default follows the system setting.");
+    micSetting.addDropdown((dd) => {
+      dd.addOption("default", "System default");
+      void listInputDevices()
+        .then((devices) => {
+          for (const d of devices.filter((dev) => dev.deviceId !== "default")) {
+            dd.addOption(d.deviceId, d.label || d.deviceId.slice(0, 8));
+          }
+          dd.setValue(this.plugin.settings.micDeviceId);
+        })
+        .catch((err) => console.error("Device enumeration failed:", err));
+      dd.setValue(this.plugin.settings.micDeviceId);
+      dd.onChange(async (value) => {
+        const devices = await listInputDevices().catch(() => []);
+        const label = devices.find((d) => d.deviceId === value)?.label ?? "";
+        this.plugin.settings = { ...this.plugin.settings, micDeviceId: value, micDeviceLabel: label };
+        await this.plugin.saveSettings();
+      });
+    });
+
+    new Setting(containerEl)
+      .setName("Capture system audio")
+      .setDesc("Also record other meeting participants (system loopback). Falls back to microphone-only with a warning if unavailable.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.captureSystemAudio)
+        .onChange(async (value) => {
+          this.plugin.settings = { ...this.plugin.settings, captureSystemAudio: value };
+          await this.plugin.saveSettings();
+        }));
 
     // --- Output ---
     containerEl.createEl("h3", { text: "Output" });

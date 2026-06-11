@@ -216,17 +216,29 @@ export class TranscriptView {
     return this.participants.map((n) => `  - "[[${n}]]"`).join("\n");
   }
 
-  /** Add audio file reference to the notes file frontmatter. */
+  /** Write the recorded WAV next to the transcript file; returns its vault path. */
+  async saveWav(buffer: ArrayBuffer): Promise<string> {
+    const base = this.transcriptFile?.path.replace(/\.md$/, "")
+      ?? `${this.settings.outputFolder}/recording`;
+    const wavPath = normalizePath(`${base}.wav`);
+    await this.app.vault.adapter.writeBinary(wavPath, buffer);
+    return wavPath;
+  }
+
+  /**
+   * Add audio file reference to the notes file frontmatter.
+   * Expects a vault-relative path (from saveWav) and stores it verbatim so
+   * the reference resolves unambiguously inside Obsidian.
+   */
   async addWavReference(wavPath: string): Promise<void> {
     if (!this.file) return;
-    const wavFilename = wavPath.split(/[/\\]/).pop() || wavPath;
     await this.app.vault.process(this.file, (content) => {
       // Insert audio field into frontmatter
       if (content.startsWith("---")) {
         const endIdx = content.indexOf("---", 3);
         if (endIdx > 0) {
           const frontmatter = content.slice(0, endIdx);
-          return frontmatter + `audio: "${wavFilename}"\n` + content.slice(endIdx);
+          return frontmatter + `audio: "${wavPath}"\n` + content.slice(endIdx);
         }
       }
       return content;

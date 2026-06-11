@@ -9,8 +9,11 @@
 
 ## Project Overview
 
-- The goal of this project is to build a AI meeting transcription application that can work both standalone and as a Obsidian Plugin.
-- Make decisions on the best possible architecuture based on simplicity and quality of code.
+- The goal of this project is to build a self-contained AI meeting transcription Obsidian plugin.
+- Audio is captured inside the plugin (mic + optional system loopback) and streamed directly to
+  AssemblyAI Universal-Streaming v3 -- no server, no standalone app, nothing to install beyond the
+  plugin (D063, supersedes the prior dual-client/Python-backend architecture).
+- Make decisions on the best possible architecture based on simplicity and quality of code.
 - Ask questions to clarify context.
 
 ## Critical Rules
@@ -49,14 +52,26 @@
 ## File Structure
 
 ```
-src/
-|-- app/              # Next.js app router
-|-- components/       # Reusable UI components
-|-- hooks/            # Custom React hooks
-|-- lib/              # Utility libraries
-|-- types/            # TypeScript definitions
-
+obsidian-plugin/             # The entire app -- a self-contained Obsidian plugin (TypeScript)
+|-- src/
+|   |-- main.ts              # Plugin entry: state machine, ribbon/status-bar, session factory
+|   |-- settings.ts          # Settings tab UI
+|   |-- *-modal.ts           # Meeting-type / participants / template-picker modals
+|   |-- transcript-view.ts   # Live transcript leaf view + file writing
+|   |-- floating-indicator.ts
+|   |-- audio/               # In-plugin capture pipeline
+|   |   |-- capture.ts       #   getUserMedia mic + Electron desktop-capture loopback
+|   |   |-- pipeline.ts      #   AudioWorklet graph, resample to 16kHz mono PCM
+|   |   |-- devices.ts  silence-monitor.ts  wav-writer.ts  frame-bus.ts  pcm-utils.ts
+|   |-- transcription/       # AssemblyAI streaming
+|   |   |-- assemblyai-client.ts  # v3 WebSocket client + reconnect
+|   |   |-- turn-handler.ts  recording-session.ts
+|   |-- shared/              # types, yaml-builder, merge-logic, format-utils, crypto
+|   |-- settings-migration.ts
 ```
+
+Audio path: capture (mic + loopback) -> pipeline (resample to PCM) -> frame-bus ->
+assemblyai-client (WebSocket) -> turn-handler -> transcript file + live view.
 
 ## Key Patterns
 
@@ -84,18 +99,21 @@ try {
 
 ## Project Management
 
-Project memory follows the Jeeves convention. All PM files live in the user-level project memory directory:
-`~/.claude/projects/{project}/memory/`
+Docs are split by purpose (global convention since 2026-06-06; supersedes the old
+"all PM files in `~/.claude/projects/`" rule). Route documentation with `jeeves:project-docs`.
 
-Key files:
-- `plan.md` - Project plan and sprint roadmap (owner: product-manager agent)
-- `decisions.md` - Architecture and product decisions (owner: product-manager agent)
-- `known-issues.md` - Bug tracking
-- `feature-backlog.md` - Feature backlog and completed phases
-- `session-log.md` - Development history
-- `research/` - Technical research documents
+| What | Where | Used for |
+|------|-------|----------|
+| Tracking docs: plans, designs/specs, features, decisions, issues, research | Obsidian working vault: `<PARA-Projects>/AI Meeting Notes/` (resolve the vault root and PARA folder via `vault-map.md` -- never hardcode) | Human-managed project memory. Index notes (`plan.md`, `features.md`, `decisions.md`, `issues.md`) hold one-line linked rows; detail lives in `plans/`, `features/`, `decisions/`, `issues/`, `Research/`. Docs stay vault-only. |
+| Plane board | linked from the project hub note (`plane-project:`) | Tasks ONLY: items needing the user's review, and implementation task lists while building. Never mirror decisions/features/plans/specs as cards. |
+| Auto-memory | `~/.claude/projects/C--Users-ekmun-Dev-ai-meeting-notes/memory/` | Claude Code auto-memory ONLY: `MEMORY.md` (auto-loaded pointer/index) plus `feedback_*`, `project_*`, `reference_*`, `user_*` files. Never tracking docs. |
+| This repository | `README.md`, `docs/` | Code-adjacent docs that ship with the code (README, architecture notes). Never plans, specs, or PM files. |
 
-Do NOT store PM files inside the repository. Never commit plan files to git.
+Conventions: decisions are named `DNNN` (sequential; check `decisions.md` for the latest).
+New design specs and implementation plans go to `plans/`; capability specs to `features/`.
+
+Do NOT store tracking docs in the repository or in the auto-memory folder.
+Never commit plan files to git.
 
 
 ## Environment Variables
