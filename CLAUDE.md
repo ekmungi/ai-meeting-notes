@@ -49,14 +49,17 @@
 ## File Structure
 
 ```
-src/
-|-- app/              # Next.js app router
-|-- components/       # Reusable UI components
-|-- hooks/            # Custom React hooks
-|-- lib/              # Utility libraries
-|-- types/            # TypeScript definitions
-
+backend/                  # Python server: audio capture (WASAPI), engines (AssemblyAI/whisper)
+|-- src/meeting_notes/    #   audio/, engines/, server/, output/, session.py, config.py
+obsidian-plugin/          # TypeScript Obsidian plugin + Electron desktop app
+|-- src/                  #   plugin code: main.ts, settings.ts, modals, transcript-view
+|-- src/shared/           #   code shared between plugin and desktop (types, yaml, merge)
+|-- src/desktop/          #   standalone Electron app (main, preload, renderer)
+releases/                 # Build outputs (server exe, plugin zip, desktop installer)
 ```
+
+Note: the serverless-plugin refactor (in design, 2026-06) will remove `backend/`,
+`src/desktop/`, and `releases/` -- update this section when that lands.
 
 ## Key Patterns
 
@@ -84,18 +87,21 @@ try {
 
 ## Project Management
 
-Project memory follows the Jeeves convention. All PM files live in the user-level project memory directory:
-`~/.claude/projects/{project}/memory/`
+Docs are split by purpose (global convention since 2026-06-06; supersedes the old
+"all PM files in `~/.claude/projects/`" rule). Route documentation with `jeeves:project-docs`.
 
-Key files:
-- `plan.md` - Project plan and sprint roadmap (owner: product-manager agent)
-- `decisions.md` - Architecture and product decisions (owner: product-manager agent)
-- `known-issues.md` - Bug tracking
-- `feature-backlog.md` - Feature backlog and completed phases
-- `session-log.md` - Development history
-- `research/` - Technical research documents
+| What | Where | Used for |
+|------|-------|----------|
+| Tracking docs: plans, designs/specs, features, decisions, issues, research | Obsidian working vault: `<PARA-Projects>/AI Meeting Notes/` (resolve the vault root and PARA folder via `vault-map.md` -- never hardcode) | Human-managed project memory. Index notes (`plan.md`, `features.md`, `decisions.md`, `issues.md`) hold one-line linked rows; detail lives in `plans/`, `features/`, `decisions/`, `issues/`, `Research/`. Docs stay vault-only. |
+| Plane board | linked from the project hub note (`plane-project:`) | Tasks ONLY: items needing the user's review, and implementation task lists while building. Never mirror decisions/features/plans/specs as cards. |
+| Auto-memory | `~/.claude/projects/C--Users-ekmun-Dev-ai-meeting-notes/memory/` | Claude Code auto-memory ONLY: `MEMORY.md` (auto-loaded pointer/index) plus `feedback_*`, `project_*`, `reference_*`, `user_*` files. Never tracking docs. |
+| This repository | `README.md`, `docs/` | Code-adjacent docs that ship with the code (README, architecture notes). Never plans, specs, or PM files. |
 
-Do NOT store PM files inside the repository. Never commit plan files to git.
+Conventions: decisions are named `DNNN` (sequential; check `decisions.md` for the latest).
+New design specs and implementation plans go to `plans/`; capability specs to `features/`.
+
+Do NOT store tracking docs in the repository or in the auto-memory folder.
+Never commit plan files to git.
 
 
 ## Environment Variables
