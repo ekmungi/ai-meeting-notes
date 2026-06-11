@@ -30,9 +30,20 @@ An Obsidian plugin that transcribes meetings in real time using AssemblyAI. Audi
 
 ## Installation
 
+### Via BRAT (recommended)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs and auto-updates beta plugins straight from this repository.
+
+1. Install the **BRAT** community plugin and enable it.
+2. Run the command **BRAT: Add a beta plugin for testing**.
+3. Enter `ekmungi/ai-meeting-notes` and confirm. BRAT pulls the latest release.
+4. Enable **AI Meeting Notes** under **Settings > Community plugins**.
+
+BRAT checks this repo's releases for updates, so new versions arrive automatically.
+
 ### Manual install
 
-1. Build or obtain `main.js`, `manifest.json`, and `styles.css` from the plugin directory.
+1. From the [latest release](https://github.com/ekmungi/ai-meeting-notes/releases/latest), download `main.js`, `manifest.json`, and `styles.css`.
 2. Create the folder `<vault>/.obsidian/plugins/ai-meeting-notes/`.
 3. Copy the three files into that folder.
 4. In Obsidian: **Settings > Community plugins > Installed plugins**, enable **AI Meeting Notes**.

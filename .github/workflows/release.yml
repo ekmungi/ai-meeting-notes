@@ -1,0 +1,55 @@
+# Builds the Obsidian plugin and publishes a GitHub release on a version tag.
+# Tag format matches the manifest version with no leading "v" (e.g. 1.0.0),
+# per Obsidian convention. The release assets (main.js, manifest.json,
+# styles.css) are what BRAT and the community store download.
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: obsidian-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify tag matches manifest version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match manifest version ${MANIFEST_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Publish release with plugin assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create the release if it does not exist; otherwise (e.g. created
+          # manually) just (re)upload the assets so the run stays idempotent.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" main.js manifest.json styles.css \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "Install or update via BRAT (ekmungi/ai-meeting-notes), or download the three files into <vault>/.obsidian/plugins/ai-meeting-notes/."
+          fi

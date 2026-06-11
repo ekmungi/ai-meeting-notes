@@ -134,6 +134,21 @@ Never commit plan files to git.
 - `/code-review` - Review code quality
 - `/build-fix` - Fix build errors
 
+## Releasing (BRAT + GitHub releases)
+
+The plugin is distributed via BRAT (`ekmungi/ai-meeting-notes`), which reads `manifest.json`
+from the **repo root** and downloads assets from the matching GitHub release.
+
+Version bump touchpoints (keep ALL in sync):
+- `obsidian-plugin/manifest.json` and `obsidian-plugin/versions.json` (canonical, used by the build)
+- `manifest.json` and `versions.json` at the **repo root** (BRAT reads these for version detection)
+- `obsidian-plugin/package.json`
+
+To cut a release: bump the four files, commit, then push a tag equal to the version with no `v`
+prefix (e.g. `git tag 1.0.1 && git push origin 1.0.1`). The `.github/workflows/release.yml` action
+builds `main.js` and publishes a release with `main.js` + `manifest.json` + `styles.css` attached.
+The tag must equal `manifest.json` version or the workflow fails the guard.
+
 ## Git Workflow
 
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
