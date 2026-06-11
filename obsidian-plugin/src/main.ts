@@ -337,21 +337,6 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
   }
 
-  /**
-   * Error-path teardown: finalize the note and drop the session without a
-   * graceful stop (used when the session is already broken).
-   */
-  private async onRecordingStopped(): Promise<void> {
-    await this.transcriptView?.finalize(this.elapsedSeconds);
-    this.stopElapsedTimer();
-    this.session?.stop().catch(() => undefined);
-    this.session = null;
-    this.unwatchDevices?.();
-    this.unwatchDevices = null;
-    this.clearSilenceUi();
-    this.setState("idle");
-  }
-
   /** React to OS device changes: re-acquire the preferred mic when it returns. */
   private watchDeviceChanges(): void {
     this.unwatchDevices = watchDevices(async () => {
