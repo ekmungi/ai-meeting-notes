@@ -34,6 +34,7 @@ import { AudioPipeline, SAMPLE_RATE } from "./audio/pipeline";
 import { AssemblyAIClient } from "./transcription/assemblyai-client";
 import { chooseDevice, listInputDevices, watchDevices } from "./audio/devices";
 import { migrateSettings } from "./settings-migration";
+import { buildKeyTerms } from "./shared/keyterms";
 
 /** Ribbon icon states. */
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
@@ -192,6 +193,17 @@ export default class AIMeetingNotesPlugin extends Plugin {
     }
   }
 
+  /** Collect contact-folder basenames for keyterm boosting (best-effort). */
+  private _contactNames(): string[] {
+    const folderPath = this.settings.stakeholdersFolder;
+    if (!folderPath) return [];
+    const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
+    if (!(folder instanceof TFolder)) return [];
+    return folder.children
+      .filter((c): c is TFile => c instanceof TFile && c.extension === "md")
+      .map((f) => f.basename);
+  }
+
   /** Build a RecordingSession wired to real audio + AssemblyAI for current settings. */
   private createSession(): RecordingSession {
     // Exchange the long-lived API key for a short-lived streaming token.
@@ -239,7 +251,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
           sampleRate: SAMPLE_RATE,
           endpointing: this.settings.endpointing,
           speakerLabels: this.settings.enableDiarization,
-          keyTerms: [],   // populated in a later task (participant names + custom terms)
+          keyTerms: buildKeyTerms(this._contactNames(), this.settings.keyTerms),
           onSegment, onError,
         }),
       },
