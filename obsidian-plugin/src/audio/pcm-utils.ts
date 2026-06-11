@@ -13,20 +13,27 @@ export function floatTo16(sample: number): number {
 /** Accumulates Float32 blocks and emits fixed-size Int16 frames. */
 export class FrameAccumulator {
   private readonly frameSamples: number;
-  private pending: number[] = [];
+  // Pre-allocated fill buffer: this path runs at sample rate for hours, so no
+  // per-sample boxing or per-frame reallocation (GC pauses cause audio glitches).
+  private readonly buffer: Int16Array;
+  private fill = 0;
 
   /** @param frameSamples Samples per emitted frame (1600 = 100ms at 16kHz). */
   constructor(frameSamples: number) {
     this.frameSamples = frameSamples;
+    this.buffer = new Int16Array(frameSamples);
   }
 
   /** Push a block; returns zero or more completed frames. */
   push(block: Float32Array): Int16Array[] {
-    for (const s of block) this.pending.push(floatTo16(s));
     const frames: Int16Array[] = [];
-    while (this.pending.length >= this.frameSamples) {
-      frames.push(new Int16Array(this.pending.slice(0, this.frameSamples)));
-      this.pending = this.pending.slice(this.frameSamples);
+    for (const s of block) {
+      this.buffer[this.fill] = floatTo16(s);
+      this.fill += 1;
+      if (this.fill === this.frameSamples) {
+        frames.push(this.buffer.slice());   // copy out; the fill buffer is reused
+        this.fill = 0;
+      }
     }
     return frames;
   }

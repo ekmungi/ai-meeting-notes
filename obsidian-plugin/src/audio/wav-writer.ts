@@ -2,6 +2,8 @@
 // Accumulates int16 PCM frames and encodes a 16kHz mono WAV (RIFF) buffer -
 // TS port of backend audio/wav_writer.py. The local safety net: keeps the
 // meeting audio even if cloud transcription dies.
+// Memory ceiling: holds the whole meeting (~115 MB/h at 16kHz mono int16);
+// encode() allocates one additional full copy at stop.
 
 /** In-memory WAV builder for mono int16 PCM. */
 export class WavWriter {
@@ -15,7 +17,9 @@ export class WavWriter {
 
   /** Append one PCM frame. */
   append(frame: Int16Array): void {
-    this.chunks = [...this.chunks, frame];
+    // Mutating push on the private accumulator: this runs every 100ms for
+    // hours; immutable reassignment here is O(n^2) over a meeting.
+    this.chunks.push(frame);
     this.totalSamples += frame.length;
   }
 
