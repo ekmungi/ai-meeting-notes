@@ -59,13 +59,16 @@ describe("TurnHandler", () => {
     expect(segments.filter((s) => !s.is_partial)[0].text).toBe("Right");
   });
 
-  it("uses the native speaker_label when enabled", () => {
+  it("uses the native speaker_label, not turn_order, when enabled", () => {
     const { h, segments } = make({ speakerLabels: true });
-    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "A" });
-    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 1, speaker_label: "B" });
+    // turn_order is deliberately misaligned with speaker_label: if the old
+    // turn_order mapping were still used these would render "F"/"J", proving
+    // the label comes from speaker_label.
+    h.handleTurn({ transcript: "First speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 5, speaker_label: "B" });
+    h.handleTurn({ transcript: "Second speaker talking now.", turn_is_formatted: true, end_of_turn: true, turn_order: 9, speaker_label: "A" });
     const finals = segments.filter((s) => !s.is_partial);
-    expect(finals[0].speaker).toBe("A");
-    expect(finals[1].speaker).toBe("B");
+    expect(finals[0].speaker).toBe("B");
+    expect(finals[1].speaker).toBe("A");
   });
 
   it("leaves speaker null when diarization is off", () => {
