@@ -22,7 +22,7 @@
 
 import { type App, TFile, TFolder, normalizePath } from "obsidian";
 import type { MeetingNotesSettings, TranscriptMessage } from "./types";
-import { formatFileTimestamp, sanitizeFilename, formatIsoDate, formatIsoTime } from "./shared/format-utils";
+import { formatFileTimestamp, formatIsoDate, formatIsoTime, buildMeetingBaseName } from "./shared/format-utils";
 import { buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
 import { extractTranscriptBody, mergeTranscriptIntoNotes } from "./shared/merge-logic";
 
@@ -58,6 +58,7 @@ export class TranscriptView {
   private lastSpeaker: string | null = null;
   private participants: string[] = [];
   private templateOverride: string | null = null;
+  private description = "";
 
   constructor(app: App, settings: MeetingNotesSettings) {
     this.app = app;
@@ -106,6 +107,7 @@ export class TranscriptView {
     // Reset per-session state so a previous recording's choices don't leak
     this.participants = [];
     this.templateOverride = null;
+    this.description = "";
 
     const notesFolder = this.settings.outputFolder || "Meetings";
     // Transcript folder falls back to notes folder if empty
@@ -125,8 +127,7 @@ export class TranscriptView {
     }
 
     const ts = formatFileTimestamp(now);
-    const safeType = sanitizeFilename(meetingType);
-    const baseName = `${ts} ${safeType}`;
+    const baseName = buildMeetingBaseName(ts, this.description, meetingType);
     const transcriptBaseName = `${baseName}_transcript`;
 
     // Create transcript file (in transcript folder)
@@ -335,6 +336,11 @@ export class TranscriptView {
     this.templateOverride = path;
   }
 
+  /** Called from main.ts after the description modal resolves. */
+  setDescription(description: string): void {
+    this.description = description;
+  }
+
   /**
    * Update only the YAML frontmatter of the notes file to reflect the current
    * participants and template's custom YAML fields. The body is preserved as-is
@@ -385,8 +391,7 @@ export class TranscriptView {
     const transcriptFolderPath = normalizePath(transcriptFolder);
     const ts = formatFileTimestamp(this.startTime);
 
-    const safeType = sanitizeFilename(meetingType);
-    const newBaseName = `${ts} ${safeType}`;
+    const newBaseName = buildMeetingBaseName(ts, this.description, meetingType);
     const newTranscriptBaseName = `${newBaseName}_transcript`;
     const newTranscriptPath = normalizePath(`${transcriptFolderPath}/${newTranscriptBaseName}.md`);
     const newNotesPath = normalizePath(`${notesFolderPath}/${newBaseName}.md`);
