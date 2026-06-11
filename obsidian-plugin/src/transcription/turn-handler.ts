@@ -78,7 +78,7 @@ export class TurnHandler {
       // Formatted final - the only event that reaches the transcript file.
       this.lastTurnEndTime = this.now();
       const speaker = this.opts.speakerLabels
-        ? String.fromCharCode("A".charCodeAt(0) + (event.turn_order % 26))
+        ? String.fromCharCode("A".charCodeAt(0) + ((event.turn_order ?? 0) % 26))
         : null;
       this.handleFinal(text, elapsed, speaker);
       return;
