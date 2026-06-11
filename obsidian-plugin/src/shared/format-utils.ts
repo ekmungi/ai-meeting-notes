@@ -9,13 +9,27 @@ export function formatFileTimestamp(date: Date): string {
   );
 }
 
-/** Remove characters illegal in Windows/Obsidian filenames. */
-export function sanitizeFilename(name: string): string {
-  const sanitized = name
+/** Sanitize a filename segment; returns "" when nothing usable remains (no fallback). */
+export function sanitizeSegment(name: string): string {
+  return name
     .replace(/[<>:"/\\|?*]/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^[- ]+|[- ]+$/g, "");
-  return sanitized || "Meeting Notes";
+}
+
+/** Remove characters illegal in Windows/Obsidian filenames. */
+export function sanitizeFilename(name: string): string {
+  return sanitizeSegment(name) || "Meeting Notes";
+}
+
+/**
+ * Build the meeting base name: "{timestamp} - {description} - {type}", or
+ * "{timestamp} - {type}" when the description is empty/unusable.
+ */
+export function buildMeetingBaseName(timestamp: string, description: string, type: string): string {
+  const safeType = sanitizeFilename(type);
+  const safeDesc = sanitizeSegment(description);
+  return safeDesc ? `${timestamp} - ${safeDesc} - ${safeType}` : `${timestamp} - ${safeType}`;
 }
 
 /** Format a duration in seconds as H:MM:SS. */
