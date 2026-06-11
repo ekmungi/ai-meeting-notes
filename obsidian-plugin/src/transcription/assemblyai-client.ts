@@ -4,7 +4,7 @@
 // Reconnects with a frame ring buffer so brief network blips lose no audio.
 
 import { ENDPOINTING_PRESETS, TurnHandler } from "./turn-handler";
-import type { Segment } from "./turn-handler";
+import type { Segment, TurnEvent } from "./turn-handler";
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 500;       // 0.5s, 1s, 2s backoff
@@ -62,7 +62,9 @@ export class AssemblyAIClient {
   private readonly turns: TurnHandler;
   private ws: WebSocket | null = null;
   private stopping = false;
+  private failed = false;
   private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private ring: Int16Array[] = [];
 
   constructor(options: AssemblyAIClientOptions) {
@@ -81,6 +83,7 @@ export class AssemblyAIClient {
    */
   async start(): Promise<void> {
     this.stopping = false;
+    this.failed = false;
     await this.connect();
   }
 
@@ -106,6 +109,11 @@ export class AssemblyAIClient {
    * Graceful shutdown: flush turn, terminate session, emit buffered fragments.
    */
   async stop(): Promise<void> {
+    // Cancel any pending reconnect timer before it spawns a new socket.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.stopping = true;
     this.sendJson({ type: "ForceEndpoint" });
     this.sendJson({ type: "Terminate" });
@@ -120,11 +128,23 @@ export class AssemblyAIClient {
   }
 
   /**
+   * Emit a terminal error Notice at most once per session.
+   * @param message - Human-readable error message for the user.
+   */
+  private fail(message: string): void {
+    if (this.failed || this.stopping) return;
+    this.failed = true;
+    this.opts.onError(message);
+  }
+
+  /**
    * Fetch a token, construct the WebSocket, and wire up event handlers.
    * Called on start() and each reconnect attempt.
    */
   private async connect(): Promise<void> {
     const token = await this.opts.tokenProvider();
+    // stop() may have raced the async token fetch — do not open a new socket.
+    if (this.stopping) return;
     const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing));
     this.ws = ws;
 
@@ -137,11 +157,17 @@ export class AssemblyAIClient {
     };
 
     ws.onmessage = (e: { data: unknown }) => {
+      let msg: { type?: string; error?: unknown };
       try {
-        const raw = typeof e.data === "string" ? e.data : "";
-        const msg = JSON.parse(raw);
-        if (msg.type === "Turn") this.turns.handleTurn(msg);
-      } catch { /* non-JSON frames are never expected; ignore */ }
+        msg = JSON.parse(typeof e.data === "string" ? e.data : "");
+      } catch {
+        return;   // non-JSON frames are never expected; ignore
+      }
+      if (msg.type === "Error") {
+        this.fail(`AssemblyAI error: ${String(msg.error ?? "unknown")}`);
+        return;
+      }
+      if (msg.type === "Turn") this.turns.handleTurn(msg as unknown as TurnEvent);
     };
 
     ws.onerror = () => { /* onclose always follows; handled there */ };
@@ -149,7 +175,7 @@ export class AssemblyAIClient {
     ws.onclose = () => {
       if (this.stopping) return;
       if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-        this.opts.onError(
+        this.fail(
           "Transcription connection lost and could not be restored. " +
           "Recording continues; WAV audio is preserved if enabled."
         );
@@ -157,10 +183,11 @@ export class AssemblyAIClient {
       }
       const delay = RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt;
       this.reconnectAttempt += 1;
-      setTimeout(() => {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
         if (!this.stopping) {
           this.connect().catch(() => {
-            this.opts.onError(
+            this.fail(
               "Transcription reconnect failed (token fetch). " +
               "Recording continues; WAV audio is preserved if enabled."
             );

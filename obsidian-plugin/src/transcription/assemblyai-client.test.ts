@@ -98,4 +98,87 @@ describe("AssemblyAIClient", () => {
     }
     await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0), { timeout: 5000 });
   });
+
+  it("does not open a new socket when stop() races a pending reconnect", async () => {
+    let resolveToken: (t: string) => void = () => {};
+    const slowToken = vi.fn()
+      .mockResolvedValueOnce("tok1")
+      .mockImplementationOnce(() => new Promise<string>((r) => { resolveToken = r; }));
+    FakeWs.instances = [];
+    const client = new AssemblyAIClient({
+      tokenProvider: slowToken,
+      wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
+      sampleRate: 16000, endpointing: "conservative", speakerLabels: false,
+      onSegment: () => {}, onError: () => {},
+    });
+    await client.start();
+    FakeWs.instances[0].open();
+    FakeWs.instances[0].drop();                       // schedules reconnect
+    await vi.waitFor(() => expect(slowToken).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    await client.stop();                              // races the in-flight token fetch
+    resolveToken("tok2");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(FakeWs.instances).toHaveLength(1);         // no second socket created
+  });
+
+  it("fires onError exactly once when reconnect attempts are exhausted", async () => {
+    const { client, errors } = make();
+    await client.start();
+    FakeWs.instances[0].open();
+    FakeWs.instances[0].drop();
+    for (let i = 1; i <= 3; i++) {
+      await vi.waitFor(() => expect(FakeWs.instances.length).toBe(i + 1), { timeout: 5000 });
+      FakeWs.instances[i].drop();
+    }
+    await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0), { timeout: 5000 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(errors).toHaveLength(1);
+  });
+
+  it("fires onError once when reconnect token fetch fails", async () => {
+    const failingToken = vi.fn()
+      .mockResolvedValueOnce("tok1")
+      .mockRejectedValue(new Error("offline"));
+    FakeWs.instances = [];
+    const errors: string[] = [];
+    const client = new AssemblyAIClient({
+      tokenProvider: failingToken,
+      wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
+      sampleRate: 16000, endpointing: "conservative", speakerLabels: false,
+      onSegment: () => {}, onError: (m) => errors.push(m),
+    });
+    await client.start();
+    FakeWs.instances[0].open();
+    FakeWs.instances[0].drop();
+    await vi.waitFor(() => expect(errors).toHaveLength(1), { timeout: 5000 });
+  });
+
+  it("surfaces AssemblyAI server Error messages via onError", async () => {
+    const { client, errors } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    ws.message({ type: "Error", error: "quota exceeded" });
+    expect(errors).toEqual(["AssemblyAI error: quota exceeded"]);
+  });
+
+  it("forceEndpoint sends a ForceEndpoint message", async () => {
+    const { client } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    client.forceEndpoint();
+    const texts = ws.sent.filter((s): s is string => typeof s === "string").map((s) => JSON.parse(s).type);
+    expect(texts).toEqual(["ForceEndpoint"]);
+  });
+
+  it("ignores malformed JSON without crashing", async () => {
+    const { client, segments, errors } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    ws.onmessage?.({ data: "not json{{" });
+    expect(segments).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
 });
