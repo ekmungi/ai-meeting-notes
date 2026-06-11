@@ -14,7 +14,7 @@ export function sanitizeSegment(name: string): string {
   return name
     .replace(/[<>:"/\\|?*]/g, "-")
     .replace(/-{2,}/g, "-")
-    .replace(/^[- ]+|[- ]+$/g, "");
+    .replace(/^[\s-]+|[\s-]+$/g, "");
 }
 
 /** Remove characters illegal in Windows/Obsidian filenames. */

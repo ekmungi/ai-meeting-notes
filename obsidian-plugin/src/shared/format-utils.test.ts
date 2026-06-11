@@ -1,6 +1,6 @@
 // Tests for filename-segment helpers.
 import { describe, expect, it } from "vitest";
-import { sanitizeSegment, buildMeetingBaseName } from "./format-utils";
+import { sanitizeSegment, sanitizeFilename, buildMeetingBaseName } from "./format-utils";
 
 describe("sanitizeSegment", () => {
   it("strips illegal chars and trims, no fallback", () => {
@@ -8,6 +8,17 @@ describe("sanitizeSegment", () => {
     expect(sanitizeSegment("  hi  ")).toBe("hi");
     expect(sanitizeSegment("")).toBe("");
     expect(sanitizeSegment("///")).toBe("");
+  });
+  it("trims whitespace including tabs and newlines", () => {
+    expect(sanitizeSegment("\t")).toBe("");
+    expect(sanitizeSegment("\n hi \t")).toBe("hi");
+  });
+});
+
+describe("sanitizeFilename", () => {
+  it("falls back to 'Meeting Notes' when nothing usable remains", () => {
+    expect(sanitizeFilename("///")).toBe("Meeting Notes");
+    expect(sanitizeFilename("")).toBe("Meeting Notes");
   });
 });
 
