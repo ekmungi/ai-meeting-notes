@@ -27,6 +27,8 @@ import { TranscriptView } from "./transcript-view";
 import type { MeetingNotesSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 import { decryptValue, encryptValue } from "./crypto";
+import { getDeviceApiKey, setDeviceApiKey, hasDeviceApiKey } from "./device-secret";
+import { resolveApiKey } from "./shared/api-key-migration";
 import { FloatingIndicator } from "./floating-indicator";
 import { RecordingSession } from "./transcription/recording-session";
 import { acquireLoopback, acquireMic } from "./audio/capture";
@@ -160,18 +162,22 @@ export default class AIMeetingNotesPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    // Migrate legacy server-era data, then decrypt the API key so in-memory
-    // settings always hold plaintext.
     const merged = migrateSettings(await this.loadData());
-    this.settings = { ...merged, assemblyaiApiKey: decryptValue(merged.assemblyaiApiKey) };
+    // The API key now lives in per-device storage (localStorage), which is not
+    // synced by OneDrive/Obsidian Sync. Migrate a legacy synced key once, if it
+    // decrypts on this device.
+    const legacyDecrypted = merged.assemblyaiApiKey ? decryptValue(merged.assemblyaiApiKey) : "";
+    const { key, migrate } = resolveApiKey(getDeviceApiKey(), legacyDecrypted);
+    if (migrate) setDeviceApiKey(migrate);
+    this.settings = { ...merged, assemblyaiApiKey: key };
   }
 
   async saveSettings(): Promise<void> {
-    // Encrypt the API key before persisting to disk; in-memory key stays plaintext.
-    const dataToSave = {
-      ...this.settings,
-      assemblyaiApiKey: encryptValue(this.settings.assemblyaiApiKey),
-    };
+    const dataToSave = { ...this.settings };
+    // Once the key is stored per-device, stop writing it to the synced data.json
+    // (blank it). Until then, preserve the legacy encrypted-in-data.json behavior
+    // so an existing key is never lost.
+    dataToSave.assemblyaiApiKey = hasDeviceApiKey() ? "" : encryptValue(this.settings.assemblyaiApiKey);
     await this.saveData(dataToSave);
   }
 
