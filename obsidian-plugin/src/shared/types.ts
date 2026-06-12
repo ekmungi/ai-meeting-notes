@@ -38,7 +38,7 @@ export interface MeetingNotesSettings {
 export const DEFAULT_SETTINGS: MeetingNotesSettings = {
   assemblyaiApiKey: "",
   timestampMode: "elapsed",
-  endpointing: "conservative",
+  endpointing: "balanced",
   outputFolder: "Meetings",
   transcriptFolder: "",
   showPartials: true,

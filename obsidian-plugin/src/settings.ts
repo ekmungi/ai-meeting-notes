@@ -6,6 +6,7 @@
 import { App, Notice, PluginSettingTab, Setting, TFile, TFolder } from "obsidian";
 import type AIMeetingNotesPlugin from "./main";
 import { isEncryptionAvailable } from "./crypto";
+import { setDeviceApiKey } from "./device-secret";
 import { FolderSuggest } from "./suggest-utils";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
@@ -57,7 +58,8 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.assemblyaiApiKey)
           .onChange(async (value) => {
             this.plugin.settings = { ...this.plugin.settings, assemblyaiApiKey: value };
-            await this.plugin.saveSettings();
+            setDeviceApiKey(value);            // persist per-device (not synced)
+            await this.plugin.saveSettings();  // saveSettings blanks the key in data.json
           });
       });
 
@@ -75,13 +77,13 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Endpointing")
-      .setDesc("How aggressively to split sentences at pauses")
+      .setDesc("Trade-off between how fast text appears live and how often a sentence splits at a pause. Faster = more splits.")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("conservative", "Conservative (recommended)")
-          .addOption("very_conservative", "Very Conservative")
-          .addOption("balanced", "Balanced")
-          .addOption("aggressive", "Aggressive")
+          .addOption("aggressive", "Aggressive (snappiest, more splits)")
+          .addOption("balanced", "Balanced (recommended)")
+          .addOption("conservative", "Conservative (fewer splits, more lag)")
+          .addOption("very_conservative", "Very Conservative (least splits, most lag)")
           .setValue(this.plugin.settings.endpointing)
           .onChange(async (value) => {
             this.plugin.settings = {
