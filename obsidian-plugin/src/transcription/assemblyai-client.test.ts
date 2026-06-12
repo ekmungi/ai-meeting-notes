@@ -49,8 +49,11 @@ describe("buildStreamUrl", () => {
     expect(url).toContain("min_turn_silence=300");
     expect(url).toContain("max_turn_silence=2000");
     expect(url).toContain("speaker_labels=true");
-    expect(url).toContain("keyterms_prompt=Alice");
-    expect(url).toContain("keyterms_prompt=Acme+Corp");
+    // keyterms_prompt must be a SINGLE JSON-array-encoded param; AssemblyAI
+    // rejects repeated params with "Invalid 'keyterms_prompt': invalid JSON array".
+    const q = new URLSearchParams(url.split("?")[1]);
+    expect(q.getAll("keyterms_prompt")).toHaveLength(1);
+    expect(q.get("keyterms_prompt")).toBe('["Alice","Acme Corp"]');
     expect(url).toContain("token=tok123");
     expect(url).not.toContain("format_turns");
     expect(url).not.toContain("end_of_turn_confidence_threshold");
