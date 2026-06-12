@@ -34,7 +34,9 @@ export function buildStreamUrl(
     token,
   });
   if (speakerLabels) params.set("speaker_labels", "true");
-  for (const term of keyTerms) params.append("keyterms_prompt", term);
+  // AssemblyAI expects keyterms_prompt as ONE JSON-array value, not repeated
+  // params (repeated params fail server validation: "invalid JSON array").
+  if (keyTerms.length > 0) params.set("keyterms_prompt", JSON.stringify(keyTerms));
   return `wss://streaming.assemblyai.com/v3/ws?${params.toString()}`;
 }
 
