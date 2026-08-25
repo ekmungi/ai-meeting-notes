@@ -113,7 +113,7 @@ describe("TurnHandler", () => {
 });
 
 describe("ENDPOINTING_PRESETS", () => {
-  it("has the four presets with u3-rt-pro turn-silence params", () => {
+  it("has the four presets with v3 turn-silence params", () => {
     expect(ENDPOINTING_PRESETS.conservative.min_turn_silence).toBe(300);
     expect(ENDPOINTING_PRESETS.conservative.max_turn_silence).toBe(2000);
     expect(Object.keys(ENDPOINTING_PRESETS)).toEqual(
