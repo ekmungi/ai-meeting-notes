@@ -85,6 +85,31 @@ describe("TurnHandler", () => {
     h.handleTurn({ transcript: "going on and on still", turn_is_formatted: false, end_of_turn: false, turn_order: 0 });
     expect(forced).toHaveLength(1);
   });
+
+  // AssemblyAI labels turns under ~1s "PENDING" because there is not enough
+  // audio for a reliable speaker embedding (ISS-012). It is a sentinel, not a
+  // speaker, and must never reach the transcript.
+  it("treats the PENDING sentinel as an unknown speaker", () => {
+    const { h, segments } = make({ speakerLabels: true });
+    h.handleTurn({ transcript: "Yeah exactly right.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "PENDING" });
+    expect(segments[0].speaker).toBeNull();
+  });
+
+  it("still reports real speakers around a PENDING turn", () => {
+    const { h, segments } = make({ speakerLabels: true });
+    h.handleTurn({ transcript: "Good morning to everyone.", turn_is_formatted: true, end_of_turn: true, turn_order: 0, speaker_label: "A" });
+    h.handleTurn({ transcript: "Yeah exactly right now.", turn_is_formatted: true, end_of_turn: true, turn_order: 1, speaker_label: "PENDING" });
+    h.handleTurn({ transcript: "Let us begin the review.", turn_is_formatted: true, end_of_turn: true, turn_order: 2, speaker_label: "B" });
+    expect(segments.map((s) => s.speaker)).toEqual(["A", null, "B"]);
+  });
+
+  // turn_order is the key SpeakerRevision uses to correct earlier turns
+  // (ISS-011), so finals must carry it through to the transcript.
+  it("carries turn_order onto final segments", () => {
+    const { h, segments } = make({ speakerLabels: true });
+    h.handleTurn({ transcript: "Good morning to everyone.", turn_is_formatted: true, end_of_turn: true, turn_order: 7, speaker_label: "A" });
+    expect(segments[0].turn_order).toBe(7);
+  });
 });
 
 describe("ENDPOINTING_PRESETS", () => {

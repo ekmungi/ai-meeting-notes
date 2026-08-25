@@ -86,4 +86,6 @@ export interface TranscriptMessage {
   timestamp_start: number;
   timestamp_end: number;
   speaker: string | null;
+  /** Source turn_order, used to match SpeakerRevision corrections (ISS-011). */
+  turn_order: number | null;
 }
