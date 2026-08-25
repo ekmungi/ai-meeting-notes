@@ -1,7 +1,7 @@
 {
   "id": "ai-meeting-notes",
   "name": "AI Meeting Notes",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "minAppVersion": "1.4.0",
   "description": "Real-time meeting transcription. Captures microphone and system audio inside Obsidian and streams to AssemblyAI for live transcripts.",
   "author": "ekmungi",

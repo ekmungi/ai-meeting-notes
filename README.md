@@ -11,7 +11,7 @@ An Obsidian plugin that transcribes meetings in real time using AssemblyAI. Audi
 - **Meeting types and presets** — define meeting types; presets combine a type, template, and participant list for one-click setup
 - **Folder-based templates** — pick a template from a configured vault folder; templates support `{{meeting_type}}`, `{{date}}`, `{{transcript_embed}}`, and `{{participants}}` variables; subfolders are shown in a picker modal
 - **Participants multi-select** — select participants from a contacts/stakeholders folder (one `.md` file per person); selected names appear in the notes YAML and in `{{participants}}`
-- **Speaker labels** — labels speakers A/B/C on turn change; on by default and included at no extra cost on every model
+- **Speaker labels** — labels speakers A/B/C on turn change; on by default and included at no extra cost on every model. AssemblyAI refines its speaker assignments at the end of a session, and the transcript is rewritten with the corrected labels
 - **Silence detection** — auto-calibrating RMS energy monitor; status bar warning after a configurable threshold, an actionable notice with Extend/Dismiss/Stop buttons at 100 s, auto-stop at 120 s
 - **WAV recording** — optionally saves a local WAV file alongside the transcript as a safety net; referenced in the notes frontmatter
 - **Pause and resume** — pause mid-meeting without ending the session
@@ -111,7 +111,7 @@ cd obsidian-plugin
 npx vitest run
 ```
 
-74 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, recording session, and settings migration.
+91 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, transcript rendering, recording session, and settings migration.
 
 ### Architecture
 
