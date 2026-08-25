@@ -25,4 +25,30 @@ describe("migrateSettings", () => {
   it("handles null/undefined saved data", () => {
     expect(migrateSettings(null)).toEqual(DEFAULT_SETTINGS);
   });
+  it("defaults new installs to the cheap English model with diarization on", () => {
+    expect(DEFAULT_SETTINGS.speechModel).toBe("universal-streaming-english");
+    expect(DEFAULT_SETTINGS.enableDiarization).toBe(true);
+  });
+
+  it("keeps a valid saved speech model", () => {
+    const m = migrateSettings({ speechModel: "universal-3-5-pro" });
+    expect(m.speechModel).toBe("universal-3-5-pro");
+  });
+
+  it("replaces the retired u3-rt-pro pin with the default model", () => {
+    const m = migrateSettings({ speechModel: "u3-rt-pro" });
+    expect(m.speechModel).toBe(DEFAULT_SETTINGS.speechModel);
+  });
+
+  // Pre-D068 installs have no speechModel key. AssemblyAI is now the only
+  // speaker source and diarization costs nothing extra, so turn it on once.
+  it("turns diarization on once when upgrading a pre-model install", () => {
+    const m = migrateSettings({ enableDiarization: false, outputFolder: "Meetings" });
+    expect(m.enableDiarization).toBe(true);
+  });
+
+  it("respects diarization turned off after the upgrade", () => {
+    const m = migrateSettings({ speechModel: "universal-streaming-english", enableDiarization: false });
+    expect(m.enableDiarization).toBe(false);
+  });
 });

@@ -254,6 +254,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
           wsFactory: (url) => new WebSocket(url),
           sampleRate: SAMPLE_RATE,
           endpointing: this.settings.endpointing,
+          speechModel: this.settings.speechModel,
           speakerLabels: this.settings.enableDiarization,
           keyTerms: buildKeyTerms(this._contactNames(), this.settings.keyTerms),
           onSegment, onError,

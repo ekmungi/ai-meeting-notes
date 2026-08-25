@@ -2,6 +2,8 @@
 // Integration tests against a scripted fake WebSocket.
 import { describe, expect, it, vi } from "vitest";
 import { AssemblyAIClient, buildStreamUrl } from "./assemblyai-client";
+import { SPEECH_MODELS } from "../shared/types";
+import type { SpeechModel } from "../shared/types";
 import type { Segment } from "./turn-handler";
 
 /** Minimal scriptable WebSocket double. */
@@ -32,6 +34,7 @@ function make() {
     wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
     sampleRate: 16000,
     endpointing: "conservative",
+    speechModel: "universal-streaming-english",
     speakerLabels: false,
     keyTerms: [],
     onSegment: (s) => segments.push(s),
@@ -41,11 +44,11 @@ function make() {
 }
 
 describe("buildStreamUrl", () => {
-  it("selects u3-rt-pro with endpointing, speaker labels, and keyterms", () => {
-    const url = buildStreamUrl("tok123", 16000, "conservative", true, ["Alice", "Acme Corp"]);
+  it("emits the selected speech model with endpointing, speaker labels, and keyterms", () => {
+    const url = buildStreamUrl("tok123", 16000, "conservative", true, ["Alice", "Acme Corp"], "universal-streaming-english");
     expect(url).toContain("wss://streaming.assemblyai.com/v3/ws?");
     expect(url).toContain("sample_rate=16000");
-    expect(url).toContain("speech_model=u3-rt-pro");
+    expect(url).toContain("speech_model=universal-streaming-english");
     expect(url).toContain("min_turn_silence=300");
     expect(url).toContain("max_turn_silence=2000");
     expect(url).toContain("speaker_labels=true");
@@ -58,8 +61,19 @@ describe("buildStreamUrl", () => {
     expect(url).not.toContain("format_turns");
     expect(url).not.toContain("end_of_turn_confidence_threshold");
   });
+
+  // u3-rt-pro was retired 2026-09-02 and silently redirects to the $0.45/hr
+  // universal-3-5-pro tier, so it must never be sent again (ISS-010).
+  it("emits each supported model verbatim and never the retired u3-rt-pro alias", () => {
+    for (const model of Object.keys(SPEECH_MODELS) as SpeechModel[]) {
+      const url = buildStreamUrl("tok123", 16000, "balanced", true, [], model);
+      expect(new URLSearchParams(url.split("?")[1]).get("speech_model")).toBe(model);
+      expect(url).not.toContain("u3-rt-pro");
+    }
+  });
+
   it("omits speaker_labels and keyterms when off/empty", () => {
-    const url = buildStreamUrl("tok123", 16000, "conservative", false, []);
+    const url = buildStreamUrl("tok123", 16000, "conservative", false, [], "universal-streaming-english");
     expect(url).not.toContain("speaker_labels");
     expect(url).not.toContain("keyterms_prompt");
   });

@@ -5,6 +5,7 @@
 
 import { ENDPOINTING_PRESETS, TurnHandler } from "./turn-handler";
 import type { Segment, TurnEvent } from "./turn-handler";
+import type { SpeechModel } from "../shared/types";
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 500;       // 0.5s, 1s, 2s backoff
@@ -15,8 +16,10 @@ const FORCE_ENDPOINT_INTERVAL_S = 20;
 export type TokenProvider = () => Promise<string>;
 
 /**
- * Build the v3 streaming URL for the u3-rt-pro model with diarization,
+ * Build the v3 streaming URL for the chosen model, with diarization,
  * turn-silence endpointing, and keyterm boosting baked in.
+ * @param speechModel - Model to bill and transcribe against; all supported
+ *   models accept speaker_labels and keyterms_prompt (DEC-068).
  */
 export function buildStreamUrl(
   token: string,
@@ -24,11 +27,12 @@ export function buildStreamUrl(
   endpointing: keyof typeof ENDPOINTING_PRESETS,
   speakerLabels: boolean,
   keyTerms: string[],
+  speechModel: SpeechModel,
 ): string {
   const preset = ENDPOINTING_PRESETS[endpointing] ?? ENDPOINTING_PRESETS.conservative;
   const params = new URLSearchParams({
     sample_rate: String(sampleRate),
-    speech_model: "u3-rt-pro",   // formatting always on; no format_turns
+    speech_model: speechModel,   // formatting always on; no format_turns
     min_turn_silence: String(preset.min_turn_silence),
     max_turn_silence: String(preset.max_turn_silence),
     token,
@@ -50,6 +54,8 @@ export interface AssemblyAIClientOptions {
   sampleRate: number;
   /** Endpointing sensitivity preset. */
   endpointing: keyof typeof ENDPOINTING_PRESETS;
+  /** Streaming model to transcribe against. */
+  speechModel: SpeechModel;
   /** Whether to request speaker diarization labels. */
   speakerLabels: boolean;
   /** Key terms to boost recognition (names, jargon); may be empty. */
@@ -153,7 +159,7 @@ export class AssemblyAIClient {
     const token = await this.opts.tokenProvider();
     // stop() may have raced the async token fetch — do not open a new socket.
     if (this.stopping) return;
-    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing, this.opts.speakerLabels, this.opts.keyTerms));
+    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing, this.opts.speakerLabels, this.opts.keyTerms, this.opts.speechModel));
     this.ws = ws;
 
     ws.onopen = () => {
