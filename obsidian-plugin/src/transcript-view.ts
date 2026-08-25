@@ -25,6 +25,8 @@ import type { MeetingNotesSettings, TranscriptMessage } from "./types";
 import { formatFileTimestamp, formatIsoDate, formatIsoTime, buildMeetingBaseName } from "./shared/format-utils";
 import { buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
 import { extractTranscriptBody, mergeTranscriptIntoNotes } from "./shared/merge-logic";
+import { applySpeakerRevisions as reviseSegments, renderTranscriptBody } from "./shared/transcript-render";
+import type { RenderSegment, SpeakerRevisionEntry } from "./shared/transcript-render";
 
 const PARA_INTERVAL_S = 120; // New paragraph every 2 minutes
 const TS_INTERVAL_S = 300;   // Timestamp marker every 5 minutes
@@ -40,22 +42,23 @@ export class TranscriptView {
    * Paragraph / timestamp state (mirrors MarkdownWriter).
    *
    * The transcript file content at any point is:
-   *   header (fixed) + completedContent + currentPara + partial
+   *   header (fixed) + renderTranscriptBody(finals) + partial
    *
-   * completedContent: all finalized paragraphs and timestamp markers
-   * currentParaTexts: sentences being accumulated in the current paragraph
    * currentParaBucket: 2-min bucket index of the current paragraph
    * lastTsBucket:      last timestamp bucket (seconds) written to the file
    * partial:           italic partial text appended at the end, or ""
    * segmentCount:      total final segments written
    */
-  private completedContent = "";
-  private currentParaTexts: string[] = [];
+  /**
+   * Log of finalized segments. The body is rendered from this rather than
+   * accumulated as a string, so a SpeakerRevision can be replayed by
+   * re-rendering instead of patching text already on disk (ISS-011).
+   */
+  private finals: RenderSegment[] = [];
   private currentParaBucket = -1;
   private lastTsBucket = -1;
   private partial = "";
   private segmentCount = 0;
-  private lastSpeaker: string | null = null;
   private participants: string[] = [];
   private templateOverride: string | null = null;
   private description = "";
@@ -97,13 +100,11 @@ export class TranscriptView {
   async createNote(engine: string, meetingType = "Meeting Notes"): Promise<TFile> {
     const now = new Date();
     this.startTime = now;
-    this.completedContent = "";
-    this.currentParaTexts = [];
+    this.finals = [];
     this.currentParaBucket = -1;
     this.lastTsBucket = -1;
     this.partial = "";
     this.segmentCount = 0;
-    this.lastSpeaker = null;
     // Reset per-session state so a previous recording's choices don't leak
     this.participants = [];
     this.templateOverride = null;
@@ -254,7 +255,7 @@ export class TranscriptView {
     if (msg.is_partial) {
       await this._writePartial(msg.text);
     } else {
-      await this._writeFinal(msg.text, msg.timestamp_start, msg.speaker);
+      await this._writeFinal(msg.text, msg.timestamp_start, msg.speaker, msg.turn_order ?? null);
     }
   }
 
@@ -262,17 +263,13 @@ export class TranscriptView {
   async finalize(durationSeconds: number): Promise<void> {
     if (!this.transcriptFile) return;
 
-    // Flush any in-progress paragraph (discard trailing partial)
+    // Discard any trailing partial; the log already holds every final.
     this.partial = "";
-    if (this.currentParaTexts.length > 0) {
-      this.completedContent += this.currentParaTexts.join(" ") + "\n\n";
-      this.currentParaTexts = [];
-    }
 
     const endTime = new Date();
     const endTimeStr = formatIsoTime(endTime);
 
-    const finalBody = this.completedContent;
+    const finalBody = renderTranscriptBody(this.finals);
     const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
@@ -451,16 +448,13 @@ export class TranscriptView {
     this.partial = `\n*${text}*`;
 
     // Snapshot all state for the vault.process closure
-    const completed = this.completedContent;
-    const paraTexts = [...this.currentParaTexts];
+    const body = renderTranscriptBody(this.finals);
     const capturedPartial = this.partial;
     const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
       const bodyStart = findBody(content);
-      const header = content.slice(0, bodyStart);
-      const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
-      return header + completed + para + capturedPartial;
+      return content.slice(0, bodyStart) + body + capturedPartial;
     });
   }
 
@@ -468,7 +462,7 @@ export class TranscriptView {
    * Write a final (non-partial) segment. Updates paragraph / timestamp state,
    * then rewrites the current section via vault.process.
    */
-  private async _writeFinal(text: string, timestampStart: number, speaker: string | null = null): Promise<void> {
+  private async _writeFinal(text: string, timestampStart: number, speaker: string | null = null, turnOrder: number | null = null): Promise<void> {
     if (!this.transcriptFile) return;
 
     // --- Synchronous state update (before any await) ---
@@ -480,40 +474,46 @@ export class TranscriptView {
     const needTimestamp =
       this.settings.timestampMode !== "none" && tsBucket > this.lastTsBucket;
 
-    if (needNewPara || needTimestamp) {
-      // Flush the current paragraph into completedContent
-      if (this.currentParaTexts.length > 0) {
-        this.completedContent += this.currentParaTexts.join(" ") + "\n\n";
-        this.currentParaTexts = [];
-      }
-      if (needTimestamp) {
-        this.completedContent += this._formatTimestamp(tsBucket) + "\n\n";
-        this.lastTsBucket = tsBucket;
-      }
-      this.currentParaBucket = paraBucket;
+    let tsMarker: string | null = null;
+    if (needTimestamp) {
+      tsMarker = this._formatTimestamp(tsBucket) || null;
+      this.lastTsBucket = tsBucket;
     }
+    if (needNewPara || needTimestamp) this.currentParaBucket = paraBucket;
 
-    // Prepend speaker label if speaker changed (show on change only, D043)
-    let displayText = text;
-    if (speaker && speaker !== this.lastSpeaker) {
-      displayText = `**[Speaker ${speaker}]** ${text}`;
-      this.lastSpeaker = speaker;
-    }
-
-    this.currentParaTexts.push(displayText);
+    // The speaker label is NOT baked in here - render decides where labels go,
+    // so a later revision can move or remove one (ISS-011).
+    this.finals = [...this.finals, {
+      turnOrder, text, speaker,
+      startsParagraph: needNewPara || needTimestamp,
+      tsMarker,
+    }];
     this.partial = ""; // Clear any pending partial
     this.segmentCount++;
 
     // Snapshot for vault.process
-    const completed = this.completedContent;
-    const paraTexts = [...this.currentParaTexts];
+    const body = renderTranscriptBody(this.finals);
     const findBody = this._findBodyStart.bind(this);
 
     await this.app.vault.process(this.transcriptFile, (content) => {
       const bodyStart = findBody(content);
-      const header = content.slice(0, bodyStart);
-      const para = paraTexts.length > 0 ? paraTexts.join(" ") + "\n\n" : "";
-      return header + completed + para; // No partial
+      return content.slice(0, bodyStart) + body;   // No partial
+    });
+  }
+
+  /**
+   * Apply AssemblyAI's corrected speaker labels and re-render the transcript.
+   * Must run before finalize() releases the file handles.
+   * @param revisions - Corrections keyed by turn_order.
+   */
+  async applySpeakerRevisions(revisions: SpeakerRevisionEntry[]): Promise<void> {
+    if (!this.transcriptFile || revisions.length === 0) return;
+    this.finals = reviseSegments(this.finals, revisions);
+    const body = renderTranscriptBody(this.finals);
+    const findBody = this._findBodyStart.bind(this);
+    await this.app.vault.process(this.transcriptFile, (content) => {
+      const bodyStart = findBody(content);
+      return content.slice(0, bodyStart) + body;
     });
   }
 

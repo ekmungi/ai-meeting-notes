@@ -29,6 +29,7 @@ function make() {
   FakeWs.instances = [];
   const segments: Segment[] = [];
   const errors: string[] = [];
+  const revisions: { turn_order: number; speaker_label: string | null }[] = [];
   const client = new AssemblyAIClient({
     tokenProvider: vi.fn().mockResolvedValue("tok123"),
     wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
@@ -38,9 +39,11 @@ function make() {
     speakerLabels: false,
     keyTerms: [],
     onSegment: (s) => segments.push(s),
+    onSpeakerRevision: (r) => revisions.push(...r),
     onError: (m) => errors.push(m),
+    terminationTimeoutMs: 20,
   });
-  return { client, segments, errors };
+  return { client, segments, errors, revisions };
 }
 
 describe("buildStreamUrl", () => {
@@ -137,8 +140,10 @@ describe("AssemblyAIClient", () => {
     const client = new AssemblyAIClient({
       tokenProvider: slowToken,
       wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
-      sampleRate: 16000, endpointing: "conservative", speakerLabels: false, keyTerms: [],
-      onSegment: () => {}, onError: () => {},
+      sampleRate: 16000, endpointing: "conservative", speechModel: "universal-streaming-english",
+      speakerLabels: false, keyTerms: [],
+      onSegment: () => {}, onSpeakerRevision: () => {}, onError: () => {},
+      terminationTimeoutMs: 20,
     });
     await client.start();
     FakeWs.instances[0].open();
@@ -209,5 +214,38 @@ describe("AssemblyAIClient", () => {
     ws.onmessage?.({ data: "not json{{" });
     expect(segments).toHaveLength(0);
     expect(errors).toHaveLength(0);
+  });
+  // SpeakerRevision carries AssemblyAI's end-of-session speaker corrections and
+  // arrives AFTER Terminate but BEFORE Termination, so the socket has to stay
+  // open across stop() or the best attribution is thrown away (ISS-011).
+  it("forwards SpeakerRevision corrections", async () => {
+    const { client, revisions } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    ws.message({ type: "SpeakerRevision", revisions: [{ turn_order: 3, speaker_label: "B" }] });
+    expect(revisions).toEqual([{ turn_order: 3, speaker_label: "B" }]);
+  });
+
+  it("stop() keeps receiving corrections until Termination arrives", async () => {
+    const { client, revisions } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    const stopping = client.stop();
+    ws.message({ type: "SpeakerRevision", revisions: [{ turn_order: 1, speaker_label: "A" }] });
+    ws.message({ type: "Termination", audio_duration_seconds: 12, session_duration_seconds: 14 });
+    await stopping;
+    expect(revisions).toEqual([{ turn_order: 1, speaker_label: "A" }]);
+    expect(ws.readyState).toBe(3);
+  });
+
+  it("stop() gives up waiting for Termination rather than hanging", async () => {
+    const { client } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    await client.stop();                 // Termination never sent
+    expect(ws.readyState).toBe(3);
   });
 });
