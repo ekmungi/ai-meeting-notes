@@ -5,6 +5,7 @@
  * close-reentrancy when the callback kicks off file work.
  */
 import { App, Modal } from "obsidian";
+import { blockBackdropDismiss } from "./modal-guard";
 
 export class MeetingDescriptionModal extends Modal {
   private readonly onSubmit: (description: string) => void;
@@ -21,6 +22,7 @@ export class MeetingDescriptionModal extends Modal {
   }
 
   onOpen(): void {
+    blockBackdropDismiss(this);
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("h3", { text: "Meeting description" });

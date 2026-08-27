@@ -5,6 +5,7 @@
 
 import { App, Modal, Setting, SuggestModal } from "obsidian";
 import type { MeetingPreset } from "./shared/types";
+import { blockBackdropDismiss } from "./modal-guard";
 
 /** Discriminated union for items rendered in the suggestion list. */
 type ModalItem =
@@ -48,6 +49,12 @@ export class MeetingTypeModal extends SuggestModal<ModalItem> {
 
     this.setPlaceholder("Select meeting type...");
     this.setInstructions([{ command: "Esc", purpose: "keep default name" }]);
+  }
+
+  /** Guard the setup chain against an accidental backdrop click. */
+  onOpen(): void {
+    super.onOpen();
+    blockBackdropDismiss(this);
   }
 
   /**
@@ -159,6 +166,7 @@ class NewTypeModal extends Modal {
 
   /** Build the modal content: heading, text input, and submit button. */
   onOpen(): void {
+    blockBackdropDismiss(this);
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "New meeting type" });
 
