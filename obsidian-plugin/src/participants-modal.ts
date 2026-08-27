@@ -5,6 +5,7 @@
  */
 
 import { App, Modal, TFile, TFolder, ToggleComponent, normalizePath } from "obsidian";
+import { blockBackdropDismiss } from "./modal-guard";
 
 export class ParticipantsModal extends Modal {
   private readonly folderPath: string;
@@ -31,6 +32,7 @@ export class ParticipantsModal extends Modal {
   }
 
   onOpen(): void {
+    blockBackdropDismiss(this);
     this._buildContent();
   }
 

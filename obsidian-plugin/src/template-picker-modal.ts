@@ -5,6 +5,7 @@
  */
 
 import { App, SuggestModal, TFile, TFolder, normalizePath } from "obsidian";
+import { blockBackdropDismiss } from "./modal-guard";
 
 /** Sentinel value selected to indicate "use built-in default (no template)". */
 const USE_DEFAULT = "(use built-in default)";
@@ -21,6 +22,12 @@ export class TemplatePickerModal extends SuggestModal<Item> {
     this.onChoose = onChoose;
     this.setPlaceholder("Select template...");
     this.setInstructions([{ command: "Esc", purpose: "use built-in default" }]);
+  }
+
+  /** Guard the setup chain against an accidental backdrop click. */
+  onOpen(): void {
+    super.onOpen();
+    blockBackdropDismiss(this);
   }
 
   getSuggestions(query: string): Item[] {

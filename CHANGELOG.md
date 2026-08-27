@@ -5,6 +5,29 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-08-27
+
+### Fixed
+
+- **Paused recordings were billed for the pause.** AssemblyAI bills streaming on
+  session (connected) duration rather than audio sent, and pausing muted the
+  microphone while holding the connection open — so a 60-minute meeting paused
+  for 20 minutes still billed 60 minutes. A pause now drops the session once it
+  outlasts a 60-second grace period. Brief pauses stay connected and keep
+  AssemblyAI's accumulated speaker profiles; only a long pause gives those up,
+  which means **speaker letters may be reassigned after a long pause**.
+  Transcript timestamps continue correctly across the gap.
+- A crash mid-recording could bill up to AssemblyAI's 3-hour session cap,
+  because nothing sent the terminate signal. The connection now carries a
+  server-side inactivity timeout as a backstop.
+- **An accidental click outside a setup window no longer abandons the
+  sequence.** Meeting setup runs as a chain — type, template, participants,
+  description — and clicking the dimmed background dismissed whichever step was
+  open. Dismissing the type step aborted everything; dismissing the participants
+  step silently produced a note with no attendees. All five windows now ignore
+  background clicks. Escape still cancels deliberately, including where it is
+  offered as a real choice ("use built-in default", "keep default name").
+
 ## [1.2.1] - 2026-08-27
 
 ### Fixed
@@ -96,6 +119,7 @@ Never released on its own; these changes shipped as part of 1.2.1.
 
 - The Python backend and standalone desktop application.
 
+[1.2.2]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.2.2
 [1.2.1]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.2.1
 [1.1.2]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.1.2
 [1.1.1]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.1.1

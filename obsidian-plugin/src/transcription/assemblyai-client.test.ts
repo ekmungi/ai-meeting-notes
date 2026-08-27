@@ -75,6 +75,16 @@ describe("buildStreamUrl", () => {
     }
   });
 
+  // If Obsidian crashes mid-recording nothing sends Terminate, and the session
+  // would bill to the 3-hour cap. The server-side timeout ends it (ISS-013).
+  it("sets a server-side inactivity timeout as a crash backstop", () => {
+    const url = buildStreamUrl("tok123", 16000, "balanced", false, [], "universal-streaming-english");
+    const q = new URLSearchParams(url.split("?")[1]);
+    const timeout = Number(q.get("inactivity_timeout"));
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(3600);   // AssemblyAI's documented ceiling
+  });
+
   it("omits speaker_labels and keyterms when off/empty", () => {
     const url = buildStreamUrl("tok123", 16000, "conservative", false, [], "universal-streaming-english");
     expect(url).not.toContain("speaker_labels");

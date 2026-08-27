@@ -28,6 +28,7 @@ const baseOpts = {
   silenceThresholdSeconds: 15, sampleRate: 16000,
   onSegment: () => {}, onSilence: () => {}, onWarning: () => {}, onError: () => {},
   onSpeakerRevision: () => {},
+  pauseDisconnectSeconds: 60,
 };
 
 describe("RecordingSession", () => {
@@ -83,5 +84,64 @@ describe("RecordingSession", () => {
     const onRevision = deps.createClient.mock.calls[0][2];
     onRevision([{ turn_order: 2, speaker_label: "B" }]);
     expect(seen).toEqual([[{ turn_order: 2, speaker_label: "B" }]]);
+  });
+  // Streaming is billed on SESSION duration, not audio sent, so holding the
+  // socket open through a pause bills for the pause (ISS-013). A short grace
+  // period keeps brief pauses on the same session, which preserves AssemblyAI's
+  // speaker profiles; only a genuinely long pause disconnects.
+  it("keeps the session open for a brief pause", async () => {
+    const { deps } = makeDeps();
+    const s = new RecordingSession({ ...baseOpts, pauseDisconnectSeconds: 60 }, deps);
+    await s.start();
+    s.pause();
+    expect(deps.createClient.mock.results[0].value.stop).not.toHaveBeenCalled();
+  });
+
+  it("disconnects once a pause outlasts the grace period", async () => {
+    const { deps } = makeDeps();
+    const s = new RecordingSession({ ...baseOpts, pauseDisconnectSeconds: 0.01 }, deps);
+    await s.start();
+    s.pause();
+    const client = deps.createClient.mock.results[0].value;
+    await vi.waitFor(() => expect(client.stop).toHaveBeenCalled(), { timeout: 2000 });
+    expect(s.state).toBe("paused");
+  });
+
+  it("reconnects the same client on resume after a long pause", async () => {
+    const { deps } = makeDeps();
+    const s = new RecordingSession({ ...baseOpts, pauseDisconnectSeconds: 0.01 }, deps);
+    await s.start();
+    const client = deps.createClient.mock.results[0].value;
+    expect(client.start).toHaveBeenCalledTimes(1);
+    s.pause();
+    await vi.waitFor(() => expect(client.stop).toHaveBeenCalled(), { timeout: 2000 });
+    s.resume();
+    // Same instance restarted, so the turn handler - and therefore transcript
+    // timestamps - continue rather than resetting to zero.
+    await vi.waitFor(() => expect(client.start).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(s.state).toBe("recording");
+  });
+
+  it("does not restart the client when resuming inside the grace period", async () => {
+    const { deps } = makeDeps();
+    const s = new RecordingSession({ ...baseOpts, pauseDisconnectSeconds: 60 }, deps);
+    await s.start();
+    const client = deps.createClient.mock.results[0].value;
+    s.pause();
+    s.resume();
+    expect(client.stop).not.toHaveBeenCalled();
+    expect(client.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a pending pause disconnect when the recording is stopped", async () => {
+    const { deps } = makeDeps();
+    const s = new RecordingSession({ ...baseOpts, pauseDisconnectSeconds: 0.05 }, deps);
+    await s.start();
+    const client = deps.createClient.mock.results[0].value;
+    s.pause();
+    await s.stop();
+    const callsAfterStop = client.stop.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 120));
+    expect(client.stop.mock.calls.length).toBe(callsAfterStop);   // timer did not fire late
   });
 });
