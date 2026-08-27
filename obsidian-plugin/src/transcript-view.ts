@@ -23,7 +23,7 @@
 import { type App, TFile, TFolder, normalizePath } from "obsidian";
 import type { MeetingNotesSettings, TranscriptMessage } from "./types";
 import { formatFileTimestamp, formatIsoDate, formatIsoTime, buildMeetingBaseName } from "./shared/format-utils";
-import { buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
+import { applyAttendees, buildTranscriptYaml, buildNotesYaml, defaultNotesBody, parseTemplateContent, PLUGIN_YAML_KEYS } from "./shared/yaml-builder";
 import { extractTranscriptBody, mergeTranscriptIntoNotes } from "./shared/merge-logic";
 import { applySpeakerRevisions as reviseSegments, renderTranscriptBody } from "./shared/transcript-render";
 import type { RenderSegment, SpeakerRevisionEntry } from "./shared/transcript-render";
@@ -310,6 +310,23 @@ export class TranscriptView {
       await this._mergeTranscript();
     }
 
+    // Re-assert the plugin-owned attendees LAST. Templater (especially a
+    // template that prompts, so it resolves after our modals) and the open
+    // editor can both write the whole notes file after rebuildNotesContent,
+    // clobbering the frontmatter we wrote mid-session. processFrontMatter is
+    // editor-aware and merges keys instead of replacing the block, and by
+    // running at stop it is the last writer. Guarded so a frontmatter problem
+    // can never prevent a recording from stopping.
+    if (this.file && this.participants.length > 0) {
+      try {
+        await this.app.fileManager.processFrontMatter(this.file, (fm) => {
+          applyAttendees(fm as Record<string, unknown>, this.participants);
+        });
+      } catch (err) {
+        console.error("Could not write attendees to the notes file:", err);
+      }
+    }
+
     this.file = null;
     this.transcriptFile = null;
     this.startTime = null;
@@ -325,7 +342,11 @@ export class TranscriptView {
 
   /** Called from main.ts after the participants modal resolves. */
   setParticipants(participants: string[]): void {
-    this.participants = participants;
+    // Presets come from data.json, which is untyped at runtime - one written by
+    // an older build can carry no participants field at all.
+    this.participants = Array.isArray(participants)
+      ? participants.map((p) => String(p).trim()).filter(Boolean)
+      : [];
   }
 
   /** Called from main.ts after the template picker modal resolves. */
