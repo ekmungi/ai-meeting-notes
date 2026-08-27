@@ -111,7 +111,9 @@ cd obsidian-plugin
 npx vitest run
 ```
 
-91 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, transcript rendering, recording session, and settings migration.
+98 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, transcript rendering, recording session, and settings migration.
+
+Release history is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Architecture
 
