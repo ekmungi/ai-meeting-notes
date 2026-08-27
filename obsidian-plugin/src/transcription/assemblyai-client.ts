@@ -16,6 +16,11 @@ const FORCE_ENDPOINT_INTERVAL_S = 20;
 // SpeakerRevision lands before Termination, so stop() waits for that handshake.
 // Capped so a dead connection cannot wedge the stop path (ISS-011).
 const TERMINATION_TIMEOUT_MS = 2000;
+// Server-side backstop: if Obsidian crashes mid-recording nothing sends
+// Terminate, and the session would otherwise bill to the 3-hour cap. Set well
+// above the pause grace period so a normal pause disconnects on our terms
+// first (ISS-013).
+const INACTIVITY_TIMEOUT_S = 300;
 
 /** Returns a short-lived streaming token (IO injected for tests; prod uses requestUrl). */
 export type TokenProvider = () => Promise<string>;
@@ -38,6 +43,7 @@ export function buildStreamUrl(
   const params = new URLSearchParams({
     sample_rate: String(sampleRate),
     speech_model: speechModel,   // formatting always on; no format_turns
+    inactivity_timeout: String(INACTIVITY_TIMEOUT_S),
     min_turn_silence: String(preset.min_turn_silence),
     max_turn_silence: String(preset.max_turn_silence),
     token,

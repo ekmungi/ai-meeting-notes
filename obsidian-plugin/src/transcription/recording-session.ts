@@ -40,6 +40,14 @@ export interface SessionDeps {
 
 export interface SessionOptions {
   micDeviceId: string;
+  /**
+   * Seconds a pause may last before the streaming session is disconnected.
+   * Streaming bills on session (connected) duration rather than audio sent, so
+   * holding the socket open through a pause bills for the pause (ISS-013).
+   * The grace period keeps brief pauses on the same session, which preserves
+   * AssemblyAI's accumulated speaker profiles.
+   */
+  pauseDisconnectSeconds: number;
   captureSystemAudio: boolean;
   recordWav: boolean;
   silenceThresholdSeconds: number;
@@ -66,6 +74,9 @@ export class RecordingSession {
   private unsubscribe: (() => void) | null = null;
   private startedAt = 0;
   private elapsedBeforePause = 0;
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while the streaming session is torn down for a long pause. */
+  private disconnected = false;
 
   constructor(options: SessionOptions, deps: SessionDeps) {
     this.opts = options;
@@ -133,14 +144,47 @@ export class RecordingSession {
     this.pipeline?.setMuted(true);
     this.client?.forceEndpoint();
     this.state = "paused";
+
+    // Muting stops frames but not the meter: billing follows connected time.
+    // Disconnect once the pause looks deliberate rather than momentary.
+    this.clearPauseTimer();
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null;
+      if (this.state !== "paused" || this.disconnected) return;
+      this.disconnected = true;
+      void this.client?.stop().catch(() => undefined);
+    }, Math.max(0, this.opts.pauseDisconnectSeconds) * 1000);
   }
 
   /** Resume frame delivery after a pause. */
   resume(): void {
     if (this.state !== "paused") return;
+    this.clearPauseTimer();
     this.startedAt = performance.now() / 1000;
+
+    // Restart the SAME client instance: it owns the turn handler, so transcript
+    // timestamps continue from where they were instead of resetting to zero.
+    // A fresh streaming session does restart AssemblyAI's speaker profiles,
+    // which is the cost of not billing for a long pause.
+    if (this.disconnected) {
+      this.disconnected = false;
+      void this.client?.start().catch((err) => {
+        this.opts.onError(
+          `Could not reconnect transcription after the pause (${err instanceof Error ? err.message : String(err)}). Recording continues; WAV audio is preserved if enabled.`,
+        );
+      });
+    }
+
     this.pipeline?.setMuted(false);
     this.state = "recording";
+  }
+
+  /** Cancel a pending pause disconnect, if one is armed. */
+  private clearPauseTimer(): void {
+    if (this.pauseTimer) {
+      clearTimeout(this.pauseTimer);
+      this.pauseTimer = null;
+    }
   }
 
   /**
@@ -162,6 +206,7 @@ export class RecordingSession {
    * recordWav is false or no audio was captured).
    */
   async stop(): Promise<StopResult> {
+    this.clearPauseTimer();
     this.state = "stopping";
     const durationSeconds = this.elapsedSeconds;
     await this.client?.stop().catch(() => undefined);
@@ -174,6 +219,8 @@ export class RecordingSession {
 
   /** Release all held resources without changing state (caller sets state). */
   private async cleanup(): Promise<void> {
+    this.clearPauseTimer();
+    this.disconnected = false;
     this.unsubscribe?.();
     this.unsubscribe = null;
     await this.pipeline?.close().catch(() => undefined);

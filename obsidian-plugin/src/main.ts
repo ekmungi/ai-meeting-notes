@@ -43,6 +43,9 @@ import { listMarkdownBasenames } from "./vault-files";
 type PluginState = "idle" | "starting" | "recording" | "paused" | "stopping";
 
 /** Microphone icon for the ribbon. */
+// A pause longer than this drops the streaming session so it stops billing;
+// shorter pauses keep it, preserving AssemblyAI speaker profiles (ISS-013).
+const PAUSE_DISCONNECT_SECONDS = 60;
 const MIC_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
 
 /** Icons used inside the hover flyout. */
@@ -231,6 +234,7 @@ export default class AIMeetingNotesPlugin extends Plugin {
         captureSystemAudio: this.settings.captureSystemAudio,
         recordWav: this.settings.recordWav,
         silenceThresholdSeconds: this.settings.silenceTimerSeconds,
+        pauseDisconnectSeconds: PAUSE_DISCONNECT_SECONDS,
         sampleRate: SAMPLE_RATE,
         onSegment: (seg) => {
           this.silentSeconds = 0;
