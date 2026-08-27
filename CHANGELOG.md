@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-08-25
 
+Never released on its own; these changes shipped as part of 1.2.1.
+
 ### Added
 
 - **Transcription model setting.** The streaming model is now selectable across
@@ -95,7 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Python backend and standalone desktop application.
 
 [1.2.1]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.2.1
-[1.2.0]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.2.0
 [1.1.2]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.1.2
 [1.1.1]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.1.1
 [1.1.0]: https://github.com/ekmungi/ai-meeting-notes/releases/tag/1.1.0
