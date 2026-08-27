@@ -237,6 +237,12 @@ export default class AIMeetingNotesPlugin extends Plugin {
           this.session?.resetSilence();          // transcript activity proves speech (S8)
           this.transcriptView?.onTranscript({ type: "transcript", ...seg });
         },
+        // AssemblyAI refines speaker labels at session end; rewrite the
+        // transcript with the corrected ones (ISS-011). Fire-and-forget so a
+        // slow vault write cannot wedge the stop path.
+        onSpeakerRevision: (revisions) => {
+          void this.transcriptView?.applySpeakerRevisions(revisions);
+        },
         onSilence: (silentSeconds) => {
           this.silentSeconds = silentSeconds;
           this.updateStatusBar();
@@ -249,14 +255,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
         acquireMic,
         acquireLoopback,
         createPipeline: () => new AudioPipeline(),
-        createClient: (onSegment, onError) => new AssemblyAIClient({
+        createClient: (onSegment, onError, onSpeakerRevision) => new AssemblyAIClient({
           tokenProvider,
           wsFactory: (url) => new WebSocket(url),
           sampleRate: SAMPLE_RATE,
           endpointing: this.settings.endpointing,
+          speechModel: this.settings.speechModel,
           speakerLabels: this.settings.enableDiarization,
           keyTerms: buildKeyTerms(this._contactNames(), this.settings.keyTerms),
-          onSegment, onError,
+          onSegment, onSpeakerRevision, onError,
         }),
       },
     );
@@ -390,9 +397,15 @@ export default class AIMeetingNotesPlugin extends Plugin {
           this.transcriptView.setTemplateOverride(preset.templatePath || null);
           this.transcriptView.setParticipants(preset.participants);
           this._showDescriptionModal(async (desc) => {
-            this.transcriptView?.setDescription(desc);
-            await this.transcriptView?.rebuildNotesContent(preset.name);
-            await this.transcriptView?.renameForType(preset.name);
+            // This chain is fire-and-forget, so an unhandled rejection here
+            // would vanish and the note would silently lose its attendees.
+            try {
+              this.transcriptView?.setDescription(desc);
+              await this.transcriptView?.rebuildNotesContent(preset.name);
+              await this.transcriptView?.renameForType(preset.name);
+            } catch (err) {
+              new Notice(`Meeting Notes: could not apply preset "${preset.name}" - ${err instanceof Error ? err.message : String(err)}`, 8000);
+            }
           });
           return;
         }
@@ -415,9 +428,13 @@ export default class AIMeetingNotesPlugin extends Plugin {
           this._showParticipantsModal((participants) => {
             this.transcriptView?.setParticipants(participants);
             this._showDescriptionModal(async (desc) => {
-              this.transcriptView?.setDescription(desc);
-              await this.transcriptView?.rebuildNotesContent(selectedType);
-              await this.transcriptView?.renameForType(selectedType);
+              try {
+                this.transcriptView?.setDescription(desc);
+                await this.transcriptView?.rebuildNotesContent(selectedType);
+                await this.transcriptView?.renameForType(selectedType);
+              } catch (err) {
+                new Notice(`Meeting Notes: could not finish setting up the note - ${err instanceof Error ? err.message : String(err)}`, 8000);
+              }
             });
           });
         });

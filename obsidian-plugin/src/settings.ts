@@ -10,6 +10,8 @@ import { setDeviceApiKey } from "./device-secret";
 import { FolderSuggest } from "./suggest-utils";
 import { ParticipantsModal } from "./participants-modal";
 import { TemplatePickerModal } from "./template-picker-modal";
+import { SPEECH_MODELS } from "./shared/types";
+import type { SpeechModel } from "./shared/types";
 import { listInputDevices } from "./audio/devices";
 
 export class MeetingNotesSettingTab extends PluginSettingTab {
@@ -74,6 +76,21 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
       warningEl.style.fontSize = "0.85em";
       warningEl.style.marginTop = "-0.5em";
     }
+
+    // Model choice sets both price and accuracy. Diarization and keyterms work
+    // on every option, so the cheap tiers give up transcription quality only.
+    new Setting(containerEl)
+      .setName("Transcription model")
+      .setDesc("Higher tiers cost more per hour but transcribe more accurately. Speaker labels and key terms work on all of them.")
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(SPEECH_MODELS)) dropdown.addOption(value, label);
+        dropdown
+          .setValue(this.plugin.settings.speechModel)
+          .onChange(async (value) => {
+            this.plugin.settings = { ...this.plugin.settings, speechModel: value as SpeechModel };
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName("Endpointing")
@@ -212,7 +229,7 @@ export class MeetingNotesSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Speaker labels")
-      .setDesc("Show speaker labels in the transcript (cloud engine only). Labels may occasionally be inconsistent in real-time mode.")
+      .setDesc("Show speaker labels in the transcript. On by default and free on every model. The first turn or two of a meeting can be misassigned, and speakers talking over each other collapse to one label.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.enableDiarization)

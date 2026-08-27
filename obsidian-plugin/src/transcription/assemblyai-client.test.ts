@@ -2,6 +2,8 @@
 // Integration tests against a scripted fake WebSocket.
 import { describe, expect, it, vi } from "vitest";
 import { AssemblyAIClient, buildStreamUrl } from "./assemblyai-client";
+import { SPEECH_MODELS } from "../shared/types";
+import type { SpeechModel } from "../shared/types";
 import type { Segment } from "./turn-handler";
 
 /** Minimal scriptable WebSocket double. */
@@ -27,25 +29,29 @@ function make() {
   FakeWs.instances = [];
   const segments: Segment[] = [];
   const errors: string[] = [];
+  const revisions: { turn_order: number; speaker_label: string | null }[] = [];
   const client = new AssemblyAIClient({
     tokenProvider: vi.fn().mockResolvedValue("tok123"),
     wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
     sampleRate: 16000,
     endpointing: "conservative",
+    speechModel: "universal-streaming-english",
     speakerLabels: false,
     keyTerms: [],
     onSegment: (s) => segments.push(s),
+    onSpeakerRevision: (r) => revisions.push(...r),
     onError: (m) => errors.push(m),
+    terminationTimeoutMs: 20,
   });
-  return { client, segments, errors };
+  return { client, segments, errors, revisions };
 }
 
 describe("buildStreamUrl", () => {
-  it("selects u3-rt-pro with endpointing, speaker labels, and keyterms", () => {
-    const url = buildStreamUrl("tok123", 16000, "conservative", true, ["Alice", "Acme Corp"]);
+  it("emits the selected speech model with endpointing, speaker labels, and keyterms", () => {
+    const url = buildStreamUrl("tok123", 16000, "conservative", true, ["Alice", "Acme Corp"], "universal-streaming-english");
     expect(url).toContain("wss://streaming.assemblyai.com/v3/ws?");
     expect(url).toContain("sample_rate=16000");
-    expect(url).toContain("speech_model=u3-rt-pro");
+    expect(url).toContain("speech_model=universal-streaming-english");
     expect(url).toContain("min_turn_silence=300");
     expect(url).toContain("max_turn_silence=2000");
     expect(url).toContain("speaker_labels=true");
@@ -58,8 +64,19 @@ describe("buildStreamUrl", () => {
     expect(url).not.toContain("format_turns");
     expect(url).not.toContain("end_of_turn_confidence_threshold");
   });
+
+  // u3-rt-pro was retired 2026-09-02 and silently redirects to the $0.45/hr
+  // universal-3-5-pro tier, so it must never be sent again (ISS-010).
+  it("emits each supported model verbatim and never the retired u3-rt-pro alias", () => {
+    for (const model of Object.keys(SPEECH_MODELS) as SpeechModel[]) {
+      const url = buildStreamUrl("tok123", 16000, "balanced", true, [], model);
+      expect(new URLSearchParams(url.split("?")[1]).get("speech_model")).toBe(model);
+      expect(url).not.toContain("u3-rt-pro");
+    }
+  });
+
   it("omits speaker_labels and keyterms when off/empty", () => {
-    const url = buildStreamUrl("tok123", 16000, "conservative", false, []);
+    const url = buildStreamUrl("tok123", 16000, "conservative", false, [], "universal-streaming-english");
     expect(url).not.toContain("speaker_labels");
     expect(url).not.toContain("keyterms_prompt");
   });
@@ -123,8 +140,10 @@ describe("AssemblyAIClient", () => {
     const client = new AssemblyAIClient({
       tokenProvider: slowToken,
       wsFactory: (url: string) => new FakeWs(url) as unknown as WebSocket,
-      sampleRate: 16000, endpointing: "conservative", speakerLabels: false, keyTerms: [],
-      onSegment: () => {}, onError: () => {},
+      sampleRate: 16000, endpointing: "conservative", speechModel: "universal-streaming-english",
+      speakerLabels: false, keyTerms: [],
+      onSegment: () => {}, onSpeakerRevision: () => {}, onError: () => {},
+      terminationTimeoutMs: 20,
     });
     await client.start();
     FakeWs.instances[0].open();
@@ -195,5 +214,38 @@ describe("AssemblyAIClient", () => {
     ws.onmessage?.({ data: "not json{{" });
     expect(segments).toHaveLength(0);
     expect(errors).toHaveLength(0);
+  });
+  // SpeakerRevision carries AssemblyAI's end-of-session speaker corrections and
+  // arrives AFTER Terminate but BEFORE Termination, so the socket has to stay
+  // open across stop() or the best attribution is thrown away (ISS-011).
+  it("forwards SpeakerRevision corrections", async () => {
+    const { client, revisions } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    ws.message({ type: "SpeakerRevision", revisions: [{ turn_order: 3, speaker_label: "B" }] });
+    expect(revisions).toEqual([{ turn_order: 3, speaker_label: "B" }]);
+  });
+
+  it("stop() keeps receiving corrections until Termination arrives", async () => {
+    const { client, revisions } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    const stopping = client.stop();
+    ws.message({ type: "SpeakerRevision", revisions: [{ turn_order: 1, speaker_label: "A" }] });
+    ws.message({ type: "Termination", audio_duration_seconds: 12, session_duration_seconds: 14 });
+    await stopping;
+    expect(revisions).toEqual([{ turn_order: 1, speaker_label: "A" }]);
+    expect(ws.readyState).toBe(3);
+  });
+
+  it("stop() gives up waiting for Termination rather than hanging", async () => {
+    const { client } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    await client.stop();                 // Termination never sent
+    expect(ws.readyState).toBe(3);
   });
 });

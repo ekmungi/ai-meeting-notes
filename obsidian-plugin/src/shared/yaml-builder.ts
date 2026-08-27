@@ -107,6 +107,31 @@ export function parseTemplateContent(
   return { body, customFields };
 }
 
+/**
+ * Set the plugin-owned `attendees` key on a frontmatter object in place.
+ *
+ * Used to re-assert attendees at the end of a recording, after Templater and
+ * the editor have finished writing, because a late full-file write can
+ * otherwise clobber the frontmatter written mid-session.
+ *
+ * @param frontmatter Frontmatter object handed over by processFrontMatter.
+ * @param participants Stakeholder basenames. Empty, missing, or all-blank
+ *   leaves any existing `attendees` untouched, so re-asserting on a recording
+ *   with no preset never destroys entries the user added by hand.
+ */
+export function applyAttendees(
+  frontmatter: Record<string, unknown>,
+  participants: readonly string[] | null | undefined,
+): void {
+  const names = (participants ?? []).map((n) => String(n).trim()).filter(Boolean);
+  if (names.length === 0) return;
+  // Names normally arrive bare; tolerate an already-bracketed one so a
+  // re-assert over previously written values cannot double-wrap.
+  frontmatter.attendees = names.map((n) =>
+    n.startsWith("[[") && n.endsWith("]]") ? n : `[[${n}]]`,
+  );
+}
+
 /** Plugin-owned YAML keys that cannot be overridden by user templates. */
 export const PLUGIN_YAML_KEYS = new Set([
   "type", "date", "start-time", "end-time", "duration-mins",

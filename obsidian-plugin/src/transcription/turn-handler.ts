@@ -3,7 +3,7 @@
 // the turn/fragment logic in backend engines/cloud.py. Pure: all IO injected.
 
 /**
- * Endpointing sensitivity presets for u3-rt-pro streaming. Values are turn-silence
+ * Endpointing sensitivity presets for v3 streaming. Values are turn-silence
  * thresholds in milliseconds: min_turn_silence is the minimum pause to consider a
  * turn ended (when punctuation-confident); max_turn_silence is the hard cap.
  */
@@ -14,13 +14,20 @@ export const ENDPOINTING_PRESETS = {
   very_conservative: { min_turn_silence: 400, max_turn_silence: 3000 },
 } as const;
 
+/**
+ * AssemblyAI labels a turn "PENDING" when it holds under ~1s of audio - too
+ * little to build a reliable speaker embedding. It is a sentinel meaning
+ * "unknown", not a speaker, so it must never reach the transcript (ISS-012).
+ */
+const PENDING_SPEAKER = "PENDING";
+
 /** Subset of the AAI v3 Turn message this handler consumes. */
 export interface TurnEvent {
   transcript: string;
   turn_is_formatted: boolean;
   end_of_turn: boolean;
   turn_order: number;
-  /** Native per-turn speaker label from u3-rt-pro diarization (e.g. "A"). */
+  /** Native per-turn speaker label from streaming diarization (e.g. "A"), or "PENDING". */
   speaker_label?: string;
 }
 
@@ -31,6 +38,13 @@ export interface Segment {
   timestamp_start: number;
   timestamp_end: number;
   speaker: string | null;
+  /**
+   * Source turn_order, the key SpeakerRevision uses to correct earlier turns
+   * (ISS-011). Null when no single turn owns the text - buffered fragments
+   * flushed on stop. When fragments merge into a later turn the merged segment
+   * carries that turn's order, since its speaker attribution comes from there.
+   */
+  turn_order: number | null;
 }
 
 const COMPLETE_TWO_WORD = new Set([
@@ -83,13 +97,14 @@ export class TurnHandler {
     if (event.turn_is_formatted && event.end_of_turn) {
       // Formatted final - the only event that reaches the transcript file.
       this.lastTurnEndTime = this.now();
-      const speaker = this.opts.speakerLabels ? (event.speaker_label ?? null) : null;
-      this.handleFinal(text, elapsed, speaker);
+      const label = event.speaker_label ?? null;
+      const speaker = this.opts.speakerLabels && label !== PENDING_SPEAKER ? label : null;
+      this.handleFinal(text, elapsed, speaker, event.turn_order ?? null);
       return;
     }
 
     // Live preview (partial or unformatted end-of-turn).
-    this.opts.onSegment({ text, is_partial: true, timestamp_start: elapsed, timestamp_end: elapsed, speaker: null });
+    this.opts.onSegment({ text, is_partial: true, timestamp_start: elapsed, timestamp_end: elapsed, speaker: null, turn_order: event.turn_order ?? null });
 
     // Force a clean endpoint during long monologues (genuine partials only).
     if (!event.end_of_turn && this.now() - this.lastTurnEndTime >= this.opts.forceEndpointIntervalSeconds) {
@@ -104,14 +119,14 @@ export class TurnHandler {
     const merged = this.fragmentBuffer.join(" ");
     this.fragmentBuffer = [];
     this.opts.onSegment({
-      text: merged, is_partial: false, speaker: null,
+      text: merged, is_partial: false, speaker: null, turn_order: null,
       timestamp_start: this.fragmentTimestamp,
       timestamp_end: this.now() - this.sessionStart,
     });
   }
 
   /** Final-segment path with fragment merge (port of _handle_final_segment). */
-  private handleFinal(text: string, elapsed: number, speaker: string | null): void {
+  private handleFinal(text: string, elapsed: number, speaker: string | null, turnOrder: number | null): void {
     if (isFragment(text)) {
       if (this.fragmentBuffer.length === 0) this.fragmentTimestamp = elapsed;
       this.fragmentBuffer = [...this.fragmentBuffer, text.replace(/[.!?,]+$/, "")];
@@ -124,11 +139,11 @@ export class TurnHandler {
         ? text[0].toLowerCase() + text.slice(1) : text;
       this.fragmentBuffer = [];
       this.opts.onSegment({
-        text: `${prefix} ${adjusted}`, is_partial: false, speaker,
+        text: `${prefix} ${adjusted}`, is_partial: false, speaker, turn_order: turnOrder,
         timestamp_start: this.fragmentTimestamp, timestamp_end: elapsed,
       });
     } else {
-      this.opts.onSegment({ text, is_partial: false, speaker, timestamp_start: elapsed, timestamp_end: elapsed });
+      this.opts.onSegment({ text, is_partial: false, speaker, turn_order: turnOrder, timestamp_start: elapsed, timestamp_end: elapsed });
     }
   }
 }

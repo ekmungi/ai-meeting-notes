@@ -5,18 +5,26 @@
 
 import { ENDPOINTING_PRESETS, TurnHandler } from "./turn-handler";
 import type { Segment, TurnEvent } from "./turn-handler";
+import type { SpeechModel } from "../shared/types";
+import type { SpeakerRevisionEntry } from "../shared/transcript-render";
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 500;       // 0.5s, 1s, 2s backoff
 const RING_BUFFER_FRAMES = 150;            // 15s of 100ms frames kept while disconnected
 const FORCE_ENDPOINT_INTERVAL_S = 20;
+// AssemblyAI's end-of-session speaker refinement adds roughly 400ms and its
+// SpeakerRevision lands before Termination, so stop() waits for that handshake.
+// Capped so a dead connection cannot wedge the stop path (ISS-011).
+const TERMINATION_TIMEOUT_MS = 2000;
 
 /** Returns a short-lived streaming token (IO injected for tests; prod uses requestUrl). */
 export type TokenProvider = () => Promise<string>;
 
 /**
- * Build the v3 streaming URL for the u3-rt-pro model with diarization,
+ * Build the v3 streaming URL for the chosen model, with diarization,
  * turn-silence endpointing, and keyterm boosting baked in.
+ * @param speechModel - Model to bill and transcribe against; all supported
+ *   models accept speaker_labels and keyterms_prompt (DEC-068).
  */
 export function buildStreamUrl(
   token: string,
@@ -24,11 +32,12 @@ export function buildStreamUrl(
   endpointing: keyof typeof ENDPOINTING_PRESETS,
   speakerLabels: boolean,
   keyTerms: string[],
+  speechModel: SpeechModel,
 ): string {
   const preset = ENDPOINTING_PRESETS[endpointing] ?? ENDPOINTING_PRESETS.conservative;
   const params = new URLSearchParams({
     sample_rate: String(sampleRate),
-    speech_model: "u3-rt-pro",   // formatting always on; no format_turns
+    speech_model: speechModel,   // formatting always on; no format_turns
     min_turn_silence: String(preset.min_turn_silence),
     max_turn_silence: String(preset.max_turn_silence),
     token,
@@ -50,14 +59,20 @@ export interface AssemblyAIClientOptions {
   sampleRate: number;
   /** Endpointing sensitivity preset. */
   endpointing: keyof typeof ENDPOINTING_PRESETS;
+  /** Streaming model to transcribe against. */
+  speechModel: SpeechModel;
   /** Whether to request speaker diarization labels. */
   speakerLabels: boolean;
   /** Key terms to boost recognition (names, jargon); may be empty. */
   keyTerms: string[];
   /** Called with each finalized transcript segment. */
   onSegment: (segment: Segment) => void;
+  /** Called with corrected speaker labels when AssemblyAI revises earlier turns. */
+  onSpeakerRevision: (revisions: SpeakerRevisionEntry[]) => void;
   /** Called with a human-readable message when the connection cannot be restored. */
   onError: (message: string) => void;
+  /** How long stop() waits for Termination before closing anyway (default 2000ms). */
+  terminationTimeoutMs?: number;
 }
 
 /**
@@ -74,6 +89,8 @@ export class AssemblyAIClient {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private ring: Int16Array[] = [];
+  /** Resolves the in-flight stop() wait when Termination arrives. */
+  private terminationResolve: (() => void) | null = null;
 
   constructor(options: AssemblyAIClientOptions) {
     this.opts = options;
@@ -125,9 +142,30 @@ export class AssemblyAIClient {
     this.stopping = true;
     this.sendJson({ type: "ForceEndpoint" });
     this.sendJson({ type: "Terminate" });
+    // Hold the socket open: the end-of-session SpeakerRevision arrives after
+    // Terminate and before Termination. Closing here would discard it.
+    await this.awaitTermination();
     this.ws?.close();
     this.ws = null;
     this.turns.flush();
+  }
+
+  /**
+   * Resolve once the server confirms Termination, or after the timeout.
+   * Returns immediately when there is no open socket to wait on.
+   */
+  private awaitTermination(): Promise<void> {
+    if (!this.ws || this.ws.readyState !== 1) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const done = (): void => {
+        this.terminationResolve = null;
+        clearTimeout(timer);
+        resolve();
+      };
+      timer = setTimeout(done, this.opts.terminationTimeoutMs ?? TERMINATION_TIMEOUT_MS);
+      this.terminationResolve = done;
+    });
   }
 
   /** Send a JSON control message if the socket is open. */
@@ -153,7 +191,7 @@ export class AssemblyAIClient {
     const token = await this.opts.tokenProvider();
     // stop() may have raced the async token fetch — do not open a new socket.
     if (this.stopping) return;
-    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing, this.opts.speakerLabels, this.opts.keyTerms));
+    const ws = this.opts.wsFactory(buildStreamUrl(token, this.opts.sampleRate, this.opts.endpointing, this.opts.speakerLabels, this.opts.keyTerms, this.opts.speechModel));
     this.ws = ws;
 
     ws.onopen = () => {
@@ -175,7 +213,16 @@ export class AssemblyAIClient {
         this.fail(`AssemblyAI error: ${String(msg.error ?? "unknown")}`);
         return;
       }
-      if (msg.type === "Turn") this.turns.handleTurn(msg as unknown as TurnEvent);
+      if (msg.type === "Turn") {
+        this.turns.handleTurn(msg as unknown as TurnEvent);
+        return;
+      }
+      if (msg.type === "SpeakerRevision") {
+        const revisions = (msg as { revisions?: SpeakerRevisionEntry[] }).revisions;
+        if (Array.isArray(revisions) && revisions.length > 0) this.opts.onSpeakerRevision(revisions);
+        return;
+      }
+      if (msg.type === "Termination") this.terminationResolve?.();
     };
 
     ws.onerror = () => { /* onclose always follows; handled there */ };

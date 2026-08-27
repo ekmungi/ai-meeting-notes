@@ -5,6 +5,7 @@
 import { SilenceMonitor } from "../audio/silence-monitor";
 import { WavWriter } from "../audio/wav-writer";
 import type { Segment } from "./turn-handler";
+import type { SpeakerRevisionEntry } from "../shared/transcript-render";
 
 export type SessionState = "idle" | "recording" | "paused" | "stopping";
 
@@ -30,7 +31,11 @@ export interface SessionDeps {
   acquireMic(deviceId: string): Promise<MediaStream>;
   acquireLoopback(): Promise<MediaStream | null>;
   createPipeline(): PipelineLike;
-  createClient(onSegment: (s: Segment) => void, onError: (m: string) => void): ClientLike;
+  createClient(
+    onSegment: (s: Segment) => void,
+    onError: (m: string) => void,
+    onSpeakerRevision: (revisions: SpeakerRevisionEntry[]) => void,
+  ): ClientLike;
 }
 
 export interface SessionOptions {
@@ -40,6 +45,8 @@ export interface SessionOptions {
   silenceThresholdSeconds: number;
   sampleRate: number;
   onSegment: (segment: Segment) => void;
+  /** Corrected speaker labels from AssemblyAI, keyed by turn_order. */
+  onSpeakerRevision: (revisions: SpeakerRevisionEntry[]) => void;
   onSilence: (silentSeconds: number) => void;
   onWarning: (message: string) => void;
   onError: (message: string) => void;
@@ -88,7 +95,7 @@ export class RecordingSession {
         this.opts.onWarning("System audio capture unavailable - recording microphone only.");
       }
 
-      this.client = this.deps.createClient(this.opts.onSegment, this.opts.onError);
+      this.client = this.deps.createClient(this.opts.onSegment, this.opts.onError, this.opts.onSpeakerRevision);
       await this.client.start();
 
       this.silence = new SilenceMonitor({

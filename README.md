@@ -11,7 +11,7 @@ An Obsidian plugin that transcribes meetings in real time using AssemblyAI. Audi
 - **Meeting types and presets** — define meeting types; presets combine a type, template, and participant list for one-click setup
 - **Folder-based templates** — pick a template from a configured vault folder; templates support `{{meeting_type}}`, `{{date}}`, `{{transcript_embed}}`, and `{{participants}}` variables; subfolders are shown in a picker modal
 - **Participants multi-select** — select participants from a contacts/stakeholders folder (one `.md` file per person); selected names appear in the notes YAML and in `{{participants}}`
-- **Speaker labels** — labels speakers A/B/C on turn change (cloud engine only; optional)
+- **Speaker labels** — labels speakers A/B/C on turn change; on by default and included at no extra cost on every model. AssemblyAI refines its speaker assignments at the end of a session, and the transcript is rewritten with the corrected labels
 - **Silence detection** — auto-calibrating RMS energy monitor; status bar warning after a configurable threshold, an actionable notice with Extend/Dismiss/Stop buttons at 100 s, auto-stop at 120 s
 - **WAV recording** — optionally saves a local WAV file alongside the transcript as a safety net; referenced in the notes frontmatter
 - **Pause and resume** — pause mid-meeting without ending the session
@@ -25,7 +25,7 @@ An Obsidian plugin that transcribes meetings in real time using AssemblyAI. Audi
 |---|---|
 | Obsidian desktop | Not supported on mobile |
 | Windows 10 or 11 | System audio loopback capture requires Windows; mic-only recording may work on other platforms but is untested |
-| AssemblyAI API key | Required; streaming is billed at $0.0025/min |
+| AssemblyAI API key | Required. Billed per hour of streaming, by model: **$0.15/hr** on either Universal-Streaming tier (the default), **$0.45/hr** on Universal-3.5 Pro. AssemblyAI's free allowance covers roughly 333 hours at the default rate |
 | Internet connection | Required for transcription |
 
 ## Installation
@@ -80,7 +80,8 @@ Paste your key in the **AssemblyAI API Key** field. It is stored encrypted on yo
 | Capture system audio | Enable loopback capture of remote participants (Windows only) |
 | Silence timer | Seconds of silence before a status-bar warning; set to 0 to disable |
 | Record WAV | Save a local WAV file alongside the transcript |
-| Speaker labels | Show A/B/C speaker labels on turn change |
+| Transcription model | Streaming model to use; sets both accuracy and hourly cost ($0.15/hr default, $0.45/hr for Universal-3.5 Pro) |
+| Speaker labels | Show A/B/C speaker labels on turn change; on by default |
 | Endpointing | Controls how aggressively pauses split sentences (conservative / balanced / aggressive) |
 | Merge transcript on stop | Replace the transcript embed with full text and trash the transcript file when recording ends |
 | Contacts folder | Vault folder of `.md` files (one per person) used for the participants picker |
@@ -110,7 +111,9 @@ cd obsidian-plugin
 npx vitest run
 ```
 
-51 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, recording session, and settings migration.
+98 tests covering the audio pipeline, silence monitor, WAV writer, YAML builder, AssemblyAI client, turn handler, transcript rendering, recording session, and settings migration.
+
+Release history is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Architecture
 
