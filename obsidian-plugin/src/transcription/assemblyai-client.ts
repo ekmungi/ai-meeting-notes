@@ -26,6 +26,20 @@ const INACTIVITY_TIMEOUT_S = 300;
 export type TokenProvider = () => Promise<string>;
 
 /**
+ * Models that format their finals unconditionally and do not accept the
+ * `format_turns` parameter (AssemblyAI documents it as Universal Streaming
+ * English/Multilingual only).
+ *
+ * Membership is an opt-OUT rather than an opt-in so a model added to
+ * SPEECH_MODELS later gets `format_turns` by default. The two mistakes are not
+ * symmetric: a redundant parameter is ignored by the server, whereas a missing
+ * one silently discards the entire transcript (ISS-018).
+ */
+const MODELS_FORMATTING_UNCONDITIONALLY: ReadonlySet<SpeechModel> = new Set<SpeechModel>([
+  "universal-3-5-pro",
+]);
+
+/**
  * Build the v3 streaming URL for the chosen model, with diarization,
  * turn-silence endpointing, and keyterm boosting baked in.
  * @param speechModel - Model to bill and transcribe against; all supported
@@ -42,12 +56,17 @@ export function buildStreamUrl(
   const preset = ENDPOINTING_PRESETS[endpointing] ?? ENDPOINTING_PRESETS.conservative;
   const params = new URLSearchParams({
     sample_rate: String(sampleRate),
-    speech_model: speechModel,   // formatting always on; no format_turns
+    speech_model: speechModel,
     inactivity_timeout: String(INACTIVITY_TIMEOUT_S),
     min_turn_silence: String(preset.min_turn_silence),
     max_turn_silence: String(preset.max_turn_silence),
     token,
   });
+  // Universal Streaming defaults format_turns to FALSE, and turn-handler.ts
+  // commits a segment to the transcript file only when turn_is_formatted is
+  // true. Omitting this means live partials render while nothing is ever
+  // saved - the file keeps its header and no body (ISS-018).
+  if (!MODELS_FORMATTING_UNCONDITIONALLY.has(speechModel)) params.set("format_turns", "true");
   if (speakerLabels) params.set("speaker_labels", "true");
   // AssemblyAI expects keyterms_prompt as ONE JSON-array value, not repeated
   // params (repeated params fail server validation: "invalid JSON array").

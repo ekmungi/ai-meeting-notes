@@ -61,7 +61,10 @@ describe("buildStreamUrl", () => {
     expect(q.getAll("keyterms_prompt")).toHaveLength(1);
     expect(q.get("keyterms_prompt")).toBe('["Alice","Acme Corp"]');
     expect(url).toContain("token=tok123");
-    expect(url).not.toContain("format_turns");
+    // Universal Streaming defaults format_turns to false, and turn-handler only
+    // commits a final on a formatted turn, so this parameter is what makes the
+    // transcript reach disk at all (ISS-018).
+    expect(url).toContain("format_turns=true");
     expect(url).not.toContain("end_of_turn_confidence_threshold");
   });
 
@@ -90,6 +93,25 @@ describe("buildStreamUrl", () => {
     expect(url).not.toContain("speaker_labels");
     expect(url).not.toContain("keyterms_prompt");
   });
+
+  // AssemblyAI documents format_turns as defaulting to FALSE on the Universal
+  // Streaming tiers. turn-handler.ts commits a segment to the transcript file
+  // only when turn_is_formatted is true, so omitting this parameter means live
+  // partials keep rendering while nothing is ever saved (ISS-018).
+  it("requests formatted turns on every model that defaults them off", () => {
+    for (const model of Object.keys(SPEECH_MODELS) as SpeechModel[]) {
+      if (model === "universal-3-5-pro") continue;
+      const q = new URLSearchParams(buildStreamUrl("tok123", 16000, "balanced", true, [], model).split("?")[1]);
+      expect(q.get("format_turns")).toBe("true");
+    }
+  });
+
+  // The pro tier formats unconditionally and documents format_turns as
+  // English/Multilingual only, so sending it there is out of contract.
+  it("omits format_turns on the pro tier, which formats unconditionally", () => {
+    const q = new URLSearchParams(buildStreamUrl("tok123", 16000, "balanced", true, [], "universal-3-5-pro").split("?")[1]);
+    expect(q.get("format_turns")).toBeNull();
+  });
 });
 
 describe("AssemblyAIClient", () => {
@@ -104,6 +126,20 @@ describe("AssemblyAIClient", () => {
     ws.message({ type: "Turn", transcript: "Hello world everyone.", turn_is_formatted: true, end_of_turn: true, turn_order: 0 });
     expect(segments).toHaveLength(1);
     expect(segments[0].text).toBe("Hello world everyone.");
+  });
+
+  // The mechanism behind ISS-018: an unformatted end-of-turn is only a live
+  // preview, never a final. Without format_turns=true every turn arrives this
+  // way, so the view keeps updating while the transcript file stays empty.
+  it("treats an unformatted end-of-turn as a partial, never a final", async () => {
+    const { client, segments } = make();
+    await client.start();
+    const ws = FakeWs.instances[0];
+    ws.open();
+    ws.message({ type: "Turn", transcript: "Hello world everyone.", turn_is_formatted: false, end_of_turn: true, turn_order: 0 });
+    expect(segments).toHaveLength(1);
+    expect(segments[0].is_partial).toBe(true);
+    expect(segments.filter((s) => !s.is_partial)).toHaveLength(0);
   });
 
   it("buffers frames while disconnected and replays on reconnect", async () => {
