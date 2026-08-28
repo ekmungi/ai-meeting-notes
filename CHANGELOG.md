@@ -5,6 +5,23 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-08-28
+
+### Fixed
+
+- **No transcript was being saved at all.** Since 1.2.0, recordings on the
+  default model produced a live transcript on screen and an empty transcript
+  file on disk — frontmatter and heading, nothing underneath. AssemblyAI only
+  returns *formatted* final transcripts when explicitly asked, and the plugin
+  had stopped asking; every turn arrived unformatted, and the plugin treats an
+  unformatted turn as a live preview rather than something to save. The request
+  is restored, so transcripts are written again.
+
+  This affects **1.2.0, 1.2.1 and 1.2.2** on the default English model and on
+  Multilingual. Choosing Universal-3.5 Pro in settings avoided it, as did 1.1.2
+  and earlier. Audio was never affected: if WAV recording was enabled, those
+  meetings can still be recovered from the saved audio.
+
 ## [1.2.2] - 2026-08-27
 
 ### Fixed
